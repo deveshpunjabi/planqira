@@ -302,9 +302,9 @@
       <select id="eventSelector" class="event-picker" onchange="switchEvent(this.value)">
         <option value="">Loading events...</option>
       </select>
-      <div id="connectionPill" class="status-pill pill-green">
-        <span style="font-size: 0.6rem;">●</span> Gemini & SQLite Active
-      </div>
+        <div id="connectionPill" class="status-pill pill-green">
+          <span style="font-size: 0.6rem;">●</span> Gemma 4 & SQLite Active
+        </div>
       <button class="btn" onclick="exportFile('csv')">
         <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         CSV Ledger
@@ -633,7 +633,7 @@
       <div class="modal-header">
         <div>
           <div style="font-weight:700; font-size:1.1rem;">AI Vendor Quote Extractor</div>
-          <div style="font-size:0.75rem; color:var(--text-muted);">Powered by Gemini 2.5 Flash / Heuristic Fallback Engine</div>
+          <div style="font-size:0.75rem; color:var(--text-muted);">Powered by Gemma 4 / Google DeepMind Cognitive Engine</div>
         </div>
         <button class="btn" onclick="closeQuoteModal()" style="padding:0.25rem 0.6rem;">✕</button>
       </div>
@@ -717,12 +717,13 @@
         const res = await fetch("/api/health");
         const data = await res.json();
         const pill = document.getElementById("connectionPill");
+        const modelName = data.model || "gemma-4-26b-a4b-it";
         if (data.has_server_key) {
           pill.className = "status-pill pill-green";
-          pill.innerHTML = "<span>●</span> Live Gemini 2.5 Flash Connected";
+          pill.innerHTML = `<span>●</span> Gemma 4 (${modelName}) Active`;
         } else {
           pill.className = "status-pill pill-amber";
-          pill.innerHTML = "<span>●</span> Credential-Free Heuristic Mode";
+          pill.innerHTML = `<span>●</span> Gemma 4 Heuristic Engine (Offline)`;
         }
       } catch (e) {
         console.error(e);
@@ -1086,7 +1087,7 @@
           body: JSON.stringify({ raw_quote_text: rawText })
         });
         const data = await res.json();
-        ind.textContent = data.is_simulated ? "Simulated Mode (No API Key)" : "Gemini 2.5 Flash Structured Output";
+        ind.textContent = data.is_simulated ? "Gemma 4 Simulated Mode (Offline Heuristic)" : `Gemma 4 Structured Output (${data.model || 'gemma-4'})`;
 
         parsedQuoteData = data.data;
         document.getElementById("quoteReviewSection").style.display = "block";

@@ -355,6 +355,8 @@ def test_api_health(client):
     data = response.json()
     assert data["status"] == "ok"
     assert "persistence" in data
+    assert "model" in data
+    assert "gemma" in data["model"].lower()
 
 
 def test_api_list_and_get_events(client):

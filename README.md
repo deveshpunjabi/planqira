@@ -1,7 +1,7 @@
 # Planqira — Autonomous Event Decision, Commitment & Operations Engine
 **PromptWars Virtual [Challenge 5] Celebration & Event Planner**  
 *“Every decision. Every detail. Under control.”*  
-*FastAPI • SQLite ACID Storage • Topological DAG • Integer-Paise Precision • Gemini 2.5 Flash*
+*FastAPI • SQLite ACID Storage • Topological DAG • Integer-Paise Precision • Google DeepMind Gemma 4*
 
 ---
 
@@ -28,11 +28,12 @@ Most event planning applications fail under real-world pressure because they tre
                       │                             │
                       ▼                             ▼
 ┌───────────────────────────────┐     ┌─────────────────────────────────┐
-│   DETERMINISTIC SOLVER & DAG  │     │      GEMINI 2.5 FLASH COGNITIVE │
-│  • Integer-Paise Accounting   │     │  • WhatsApp Quote Parsing       │
-│  • Half-Up Tax Rounding       │     │  • Hidden Fee Clause Extraction │
-│  • Kahn's Cycle Detection     │     │  • Counter-Negotiation Scripts  │
-│  • BFS Parameter Invalidation │     │  • Disclosed Heuristic Fallback │
+│   DETERMINISTIC SOLVER & DAG  │     │       GEMMA 4 COGNITIVE ENGINE  │
+│  • Integer-Paise Accounting   │     │  • gemma-4-26b-a4b-it / 31b-it  │
+│  • Half-Up Tax Rounding       │     │  • WhatsApp Quote Parsing       │
+│  • Kahn's Cycle Detection     │     │  • Hidden Fee Clause Extraction │
+│  • BFS Parameter Invalidation │     │  • Counter-Negotiation Scripts  │
+│                               │     │  • Disclosed Heuristic Fallback │
 └──────────────┬────────────────┘     └─────────────────────────────────┘
                │
                ▼
@@ -72,8 +73,9 @@ Planqira strictly separates contractual commitment from cash flow:
 - **Immutable Scenario Snapshots:** Adjusting an event scenario does not overwrite history; it archives previous scenarios, increments `active_scenario_version`, inserts versioned items, and appends an immutable record to `audit_logs`.
 - **Production Readiness:** Schema is structured for clean transition to Supabase PostgreSQL by swapping the DB connection URL.
 
-### 5. Gemini 2.5 Flash Quoting & Transparent Fallback
-- **Structured Pydantic Extraction:** Ingests raw, unstructured vendor messages (e.g., messy WhatsApp texts) into typed items, tax rates, advance requirements, and hidden fee flags.
+### 5. Google DeepMind Gemma 4 Quoting & Transparent Fallback
+- **Structured Pydantic Extraction:** Ingests raw, unstructured vendor messages (e.g., messy WhatsApp texts) using `gemma-4-26b-a4b-it` / `gemma-4-31b-it` into typed items, tax rates, advance requirements, and hidden fee flags.
+- **Configurable Model Pipeline:** Reads `AI_MODEL` / `GEMINI_MODEL` from environment, natively supporting the Gemma 4 open model family.
 - **Disclosed Heuristic Fallback:** When running offline without credentials, the engine operates in transparent heuristic mode with `is_simulated: True` clearly labeled.
 
 ---

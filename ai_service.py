@@ -22,6 +22,15 @@ except ImportError:
     HAS_GENAI_LIB = False
 
 
+# Default to Google DeepMind's Gemma 4 (gemma-4-26b-a4b-it / gemma-4-31b-it) or Gemini model
+DEFAULT_MODEL = os.getenv("AI_MODEL", os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it"))
+
+
+def get_active_model() -> str:
+    """Returns the configured model identifier."""
+    return os.getenv("AI_MODEL", os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it"))
+
+
 class ExtractedLineItem(BaseModel):
     name: str
     pricing_model: str = Field(description="Must be 'FIXED', 'PER_CAPITA', or 'STEP_TIERED'")
@@ -47,6 +56,7 @@ def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150)
     otherwise runs transparent heuristic extraction disclosing simulated state.
     """
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    active_model = get_active_model()
 
     if api_key and HAS_GENAI_LIB:
         try:
@@ -59,7 +69,7 @@ def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150)
                 "Flag any surprise clauses like corkage, generator diesel, overtime penalties."
             )
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=active_model,
                 contents=f"Current Event Guests: {current_guest_count}\nVendor Message:\n{raw_quote_text}",
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
@@ -72,6 +82,7 @@ def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150)
             return {
                 "success": True,
                 "is_simulated": False,
+                "model": active_model,
                 "data": result,
                 "review_status": "PENDING_REVIEW",
             }

@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ai_service import parse_vendor_quote_text
+from ai_service import get_active_model, parse_vendor_quote_text
 from database import (
     commit_scenario_version,
     get_event_by_id,
@@ -89,6 +89,7 @@ def health():
         "status": "ok",
         "app": "Planqira — Event Decision & Operations Platform",
         "version": "2.0.0",
+        "model": get_active_model(),
         "has_server_key": bool(os.getenv("GEMINI_API_KEY")),
         "persistence": "SQLite ACID (planqira.db)",
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
