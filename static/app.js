@@ -172,20 +172,46 @@ function renderAll(data) {
     defBanner.style.display = "block";
   }
 
-  // 01. Ideas Workspace
+  // 01. Mission Overview Diagnostic
+  const ovrCallout = document.getElementById("overviewSolvencyCallout");
+  const ovrDetail = document.getElementById("overviewSolvencyDetail");
+  if (ovrCallout && ovrDetail) {
+    if (sol.solvency_status === "SOLVENT") {
+      ovrCallout.textContent = "Plan Balanced & Solvent";
+      ovrCallout.style.color = "var(--status-green)";
+      ovrDetail.textContent = `Target budget includes a dedicated 10% emergency buffer with ${formatPaise(sol.variance_paise)} unallocated surplus.`;
+    } else {
+      ovrCallout.textContent = "Solvency Deficit Detected";
+      ovrCallout.style.color = "var(--status-red)";
+      ovrDetail.textContent = `Total required spend exceeds target budget by ${formatPaise(Math.abs(sol.variance_paise))}. Headcount or scope reduction needed.`;
+    }
+  }
+
+  if (document.getElementById("overviewReserve")) document.getElementById("overviewReserve").textContent = formatPaise(sol.contingency_paise);
+  if (document.getElementById("overviewCommitted")) document.getElementById("overviewCommitted").textContent = formatPaise(sol.total_approved_commitments_paise || 0);
+  if (document.getElementById("overviewPaid")) document.getElementById("overviewPaid").textContent = formatPaise(sol.total_paid_paise);
+  if (document.getElementById("overviewOutstanding")) document.getElementById("overviewOutstanding").textContent = formatPaise(sol.total_outstanding_paise || 0);
+  if (document.getElementById("overviewCity")) document.getElementById("overviewCity").textContent = evt.city;
+  if (document.getElementById("overviewSetting")) document.getElementById("overviewSetting").textContent = evt.setting.toUpperCase();
+  if (document.getElementById("overviewDate")) document.getElementById("overviewDate").textContent = evt.event_date;
+  if (document.getElementById("overviewVersion")) document.getElementById("overviewVersion").textContent = `Scenario v${evt.active_scenario_version}`;
+
+  // 02. Ideas Workspace
   renderIdeas(data.themes || []);
 
-  // 02. Budget & Commitments Workspace
+  // 03. Budget & Commitments Workspace
   renderBudgetTable(sol.items || []);
   renderVendorsTable(data.vendors || []);
   renderPaymentsTable(data.payments || []);
 
-  // 03. Timeline & Operations Workspace
+  // 04. Timeline & Tasks Workspace
   renderTasksTable(data.tasks || []);
+
+  // 05. Event Day Operations Workspace
   renderRunbookTable(data.runbook || []);
   renderIncidentsTable(data.incidents || []);
 
-  // 04. Scenario Lab Workspace
+  // 06. Scenario Lab Workspace
   initScenarioLab(evt);
 
   // Audit Log in Mission summary
@@ -541,19 +567,27 @@ async function commitScenarioAction() {
   }
 }
 
-// 5. Tab Switching
+// 5. Tab Switching (6 Workspaces with Persistent Sidebar)
 function switchTab(tabId) {
   document.querySelectorAll(".workspace-pane").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".sidebar-btn").forEach(b => b.classList.remove("active"));
   document.querySelectorAll(".tab-button").forEach(b => b.classList.remove("active"));
 
   const targetPane = document.getElementById(tabId);
   if (targetPane) targetPane.classList.add("active");
 
-  const tabBtns = document.querySelectorAll(".tab-button");
-  if (tabId === "tabIdeas") tabBtns[0].classList.add("active");
-  if (tabId === "tabBudget") tabBtns[1].classList.add("active");
-  if (tabId === "tabTimeline") tabBtns[2].classList.add("active");
-  if (tabId === "tabScenario") tabBtns[3].classList.add("active");
+  const btnMap = {
+    tabOverview: "navBtnOverview",
+    tabIdeas: "navBtnIdeas",
+    tabBudget: "navBtnBudget",
+    tabTimeline: "navBtnTimeline",
+    tabEventDay: "navBtnEventDay",
+    tabScenario: "navBtnScenario",
+  };
+  const activeBtnId = btnMap[tabId];
+  if (activeBtnId && document.getElementById(activeBtnId)) {
+    document.getElementById(activeBtnId).classList.add("active");
+  }
 }
 
 // 6. Task & Runbook Status Actions
@@ -583,13 +617,45 @@ async function toggleRunbookStatus(cueId, newStatus) {
   }
 }
 
-// 7. Modals Implementation
+// 7. Accessible Modals (Focus Trap, Escape Dismiss, Backdrop Click)
+let lastFocusedElement = null;
+
 function openModal(id) {
-  document.getElementById(id).classList.add("open");
+  lastFocusedElement = document.activeElement;
+  const modal = document.getElementById(id);
+  if (modal) {
+    modal.classList.add("open");
+    const focusable = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (focusable.length > 0) focusable[0].focus();
+  }
 }
+
 function closeModal(id) {
-  document.getElementById(id).classList.remove("open");
+  const modal = document.getElementById(id);
+  if (modal) {
+    modal.classList.remove("open");
+  }
+  if (lastFocusedElement) {
+    lastFocusedElement.focus();
+  }
 }
+
+// Global modal accessibility listeners
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    document.querySelectorAll(".modal-overlay.open").forEach(modal => {
+      modal.classList.remove("open");
+    });
+    if (lastFocusedElement) lastFocusedElement.focus();
+  }
+});
+
+document.addEventListener("click", (e) => {
+  if (e.target && e.target.classList && e.target.classList.contains("modal-overlay")) {
+    e.target.classList.remove("open");
+    if (lastFocusedElement) lastFocusedElement.focus();
+  }
+});
 
 // Create Event Modal
 function openCreateEventModal() {
@@ -611,6 +677,11 @@ async function submitCreateEvent() {
     return;
   }
 
+  const dietaryEl = document.getElementById("newEvtDietary");
+  const styleEl = document.getElementById("newEvtStyle");
+  const dietary = dietaryEl ? dietaryEl.value : "standard";
+  const style = styleEl ? styleEl.value : "royal";
+
   const payload = {
     title,
     event_type,
@@ -623,7 +694,11 @@ async function submitCreateEvent() {
     guest_count,
     target_budget_paise: Math.round(budgetRs * 100),
     currency: "INR",
-    contingency_bps: 1000
+    contingency_bps: 1000,
+    preferences: {
+      dietary,
+      style
+    }
   };
 
   try {

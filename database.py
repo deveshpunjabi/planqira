@@ -15,6 +15,11 @@ import uuid
 from engine import compute_line_item_paise
 
 DB_FILE = "planqira.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+
+def is_postgres_configured() -> bool:
+    return bool(DATABASE_URL and (DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")))
 
 
 def get_db_path() -> str:
@@ -471,6 +476,31 @@ def create_event(event_data: Dict[str, Any], db_path: Optional[str] = None) -> D
             VALUES (?, ?, 1, 'Initial Blueprint', ?, ?, ?, 'ACTIVE', ?);
         """, (scenario_id, event_id, guests, target_budget_paise, setting, now_str))
 
+        # Personalize catering, tasks, and decor from user preferences
+        dietary_pref = str(prefs.get("dietary", "")).lower()
+        style_pref = str(prefs.get("style", "")).lower()
+
+        catering_title = "Main Celebration Dining Service"
+        catering_notes = "Per-guest dining and beverage service"
+        tasting_task_title = "Review Catering Menu & Finalize Food Tasting"
+
+        if "jain" in dietary_pref or "pure veg" in dietary_pref or "vegetarian" in dietary_pref:
+            catering_title = "Pure Vegetarian & Jain Celebration Banquet"
+            catering_notes = "Strict Pure Veg & Jain culinary service with root-vegetable restrictions observed"
+            tasting_task_title = "Finalize Pure Veg & Jain Tasting Session"
+        elif "vegan" in dietary_pref:
+            catering_title = "Plant-Based Organic Vegan Banquet"
+            catering_notes = "100% dairy-free, plant-based artisanal catering"
+            tasting_task_title = "Finalize Vegan Tasting & Ingredient Verification"
+        elif "halal" in dietary_pref:
+            catering_title = "Halal Certified Royal Feast Banquet"
+            catering_notes = "Certified Halal preparation with traditional accompaniments"
+            tasting_task_title = "Finalize Halal Menu Tasting & Certification Review"
+        elif "asian" in dietary_pref or "pan-asian" in dietary_pref:
+            catering_title = "Pan-Asian Sliders & Dim Sum Live Stations"
+            catering_notes = "Interactive live wok and dim sum dining counters"
+            tasting_task_title = "Pan-Asian Tasting & Live Station Setup Review"
+
         # Generate foundational budget line items based on event type
         allocatable = target_budget_paise - (target_budget_paise * contingency_bps + 5000) // 10000
         venue_budget = (allocatable * 30) // 100
@@ -480,9 +510,9 @@ def create_event(event_data: Dict[str, Any], db_path: Optional[str] = None) -> D
 
         items = [
             (f"item-{uuid.uuid4().hex[:10]}", scenario_id, "Venue & Space", f"{title} Main Space", "FIXED", venue_budget, 1, 1800, "ESTIMATED", 0, 0, None, None, f"Initial space allocation for {setting} setting"),
-            (f"item-{uuid.uuid4().hex[:10]}", scenario_id, "Catering", "Main Celebration Dining Service", "PER_CAPITA", catering_unit, 1, 500, "ESTIMATED", 0, 0, None, None, "Per-guest dining and beverage service"),
+            (f"item-{uuid.uuid4().hex[:10]}", scenario_id, "Catering", catering_title, "PER_CAPITA", catering_unit, 1, 500, "ESTIMATED", 0, 0, None, None, catering_notes),
             (f"item-{uuid.uuid4().hex[:10]}", scenario_id, "Seating & Tables", "Guest Dining Tables & Chairs", "STEP_TIERED", 150000, 8, 1800, "ESTIMATED", 0, 0, None, None, "1 table cluster per 8 guests"),
-            (f"item-{uuid.uuid4().hex[:10]}", scenario_id, "Decor & Styling", "Atmosphere & Floral Installation", "FIXED", decor_budget, 1, 1800, "ESTIMATED", 0, 0, None, None, "Theme-specific styling"),
+            (f"item-{uuid.uuid4().hex[:10]}", scenario_id, "Decor & Styling", "Atmosphere & Floral Installation", "FIXED", decor_budget, 1, 1800, "ESTIMATED", 0, 0, None, None, f"{prefs.get('style', 'Theme-specific')} styling"),
             (f"item-{uuid.uuid4().hex[:10]}", scenario_id, "Entertainment", "Audio System & Musical Performance", "FIXED", sound_budget, 1, 1800, "ESTIMATED", 0, 0, None, None, "Sound and stage presentation"),
         ]
         conn.executemany("""
@@ -501,7 +531,7 @@ def create_event(event_data: Dict[str, Any], db_path: Optional[str] = None) -> D
         if days_until > 30:
             tasks = [
                 (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-30 Days", "Lock Venue & Sign Base Contract", "Lead Organizer", "CRITICAL", "PENDING", 0, (evt_dt - timedelta(days=30)).strftime("%Y-%m-%d"), None),
-                (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-21 Days", "Review Catering Menu & Finalize Food Tasting", "Host", "HIGH", "PENDING", 1, (evt_dt - timedelta(days=21)).strftime("%Y-%m-%d"), None),
+                (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-21 Days", tasting_task_title, "Host", "HIGH", "PENDING", 1, (evt_dt - timedelta(days=21)).strftime("%Y-%m-%d"), None),
                 (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-7 Days", "Freeze Guest Headcount & Seating Chart", "Coordinator", "CRITICAL", "PENDING", 1, (evt_dt - timedelta(days=7)).strftime("%Y-%m-%d"), None),
                 (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-1 Day", "On-site Technical Soundcheck & Rehearsal", "Floor Lead", "HIGH", "PENDING", 0, (evt_dt - timedelta(days=1)).strftime("%Y-%m-%d"), None),
             ]
@@ -509,7 +539,7 @@ def create_event(event_data: Dict[str, Any], db_path: Optional[str] = None) -> D
             # Compressed rapid schedule for short-notice celebrations
             tasks = [
                 (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-5 Days (Rapid)", "Secure Available Venue & Immediate Token", "Lead Organizer", "CRITICAL", "PENDING", 0, (evt_dt - timedelta(days=max(1, min(5, days_until)))).strftime("%Y-%m-%d"), None),
-                (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-3 Days (Rapid)", "Lock Headcount & Confirm Catering Delivery", "Host", "CRITICAL", "PENDING", 1, (evt_dt - timedelta(days=max(1, min(3, days_until)))).strftime("%Y-%m-%d"), None),
+                (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-3 Days (Rapid)", f"Lock Headcount & {tasting_task_title}", "Host", "CRITICAL", "PENDING", 1, (evt_dt - timedelta(days=max(1, min(3, days_until)))).strftime("%Y-%m-%d"), None),
                 (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-1 Day", "Confirm Vendor Arrival Windows & Power Setup", "Coordinator", "HIGH", "PENDING", 0, (evt_dt - timedelta(days=1)).strftime("%Y-%m-%d"), None),
             ]
         conn.executemany("""
@@ -643,8 +673,8 @@ def list_events(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
 def commit_scenario_version(
     event_id: str,
     new_guests: int,
-    new_budget_items: List[Dict[str, Any]],
-    note: str,
+    new_budget_items: Optional[List[Dict[str, Any]]] = None,
+    note: str = "Scenario proposal",
     base_version: Optional[int] = None,
     new_setting: Optional[str] = None,
     new_date: Optional[str] = None,
@@ -671,6 +701,16 @@ def commit_scenario_version(
         new_sc_id = f"sc-{event_id}-v{new_version}"
         setting = new_setting or evt["setting"]
 
+        # Determine budget items: use provided or scale from active scenario
+        items_to_insert = new_budget_items
+        if items_to_insert is None or len(items_to_insert) == 0:
+            active_sc = conn.execute("SELECT id FROM scenarios WHERE event_id = ? AND status = 'ACTIVE';", (event_id,)).fetchone()
+            if active_sc:
+                prev_rows = conn.execute("SELECT * FROM budget_items WHERE scenario_id = ?;", (active_sc["id"],)).fetchall()
+                items_to_insert = [dict(r) for r in prev_rows]
+            else:
+                items_to_insert = []
+
         # Archive old active scenario
         conn.execute("UPDATE scenarios SET status = 'ARCHIVED' WHERE event_id = ? AND status = 'ACTIVE';", (event_id,))
 
@@ -680,8 +720,8 @@ def commit_scenario_version(
             VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?);
         """, (new_sc_id, event_id, new_version, f"Scenario v{new_version} ({note})", new_guests, evt["target_budget_paise"], setting, now_str))
 
-        # Insert new budget items with unique IDs, preserving payments and deposit obligations
-        for idx, it in enumerate(new_budget_items):
+        # Insert new budget items with unique IDs, preserving approvals
+        for idx, it in enumerate(items_to_insert):
             item_id = f"item-{event_id}-v{new_version}-{idx+1}-{uuid.uuid4().hex[:6]}"
             conn.execute("""
                 INSERT INTO budget_items (id, scenario_id, category, name, pricing_model, unit_cost_paise, step_capacity, tax_rate_bps, approval_state, deposit_required_paise, paid_amount_paise, deposit_due_date, superseded_by_id, notes)
@@ -697,18 +737,20 @@ def commit_scenario_version(
                 it.get("tax_rate_bps", 0),
                 it.get("approval_state", "ESTIMATED"),
                 it.get("deposit_required_paise", 0),
-                it.get("paid_amount_paise", 0),
+                0,  # Cash paid is derived from the payments ledger
                 it.get("deposit_due_date"),
                 it.get("superseded_by_id"),
                 it.get("notes"),
             ))
 
-        # Persist affected tasks as needing review
+        # Persist affected tasks as needing review (including completed tasks whose preconditions shifted)
         if invalidated_task_ids:
             for tid in invalidated_task_ids:
+                t_row = conn.execute("SELECT status FROM tasks WHERE id = ? AND event_id = ?;", (tid, event_id)).fetchone()
+                prev_st = t_row["status"] if t_row else "UNKNOWN"
                 conn.execute("""
-                    UPDATE tasks SET status = 'NEEDS_REVIEW', reverification_reason = ? WHERE id = ? AND status != 'DONE';
-                """, (f"Invalidated by Scenario v{new_version} update ({note})", tid))
+                    UPDATE tasks SET status = 'NEEDS_REVIEW', reverification_reason = ? WHERE id = ? AND event_id = ?;
+                """, (f"Invalidated by Scenario v{new_version} update ({note}) - previously {prev_st}", tid, event_id))
 
         # Flag affected vendor commitments for reconfirmation if headcount shifted
         if new_guests != evt["guest_count"]:
@@ -716,10 +758,13 @@ def commit_scenario_version(
                 UPDATE vendor_commitments SET needs_reconfirmation = 1 WHERE event_id = ?;
             """, (event_id,))
 
-        # Update event's guest count, setting, and active version
-        conn.execute("""
-            UPDATE events SET guest_count = ?, setting = ?, active_scenario_version = ? WHERE id = ?;
-        """, (new_guests, setting, new_version, event_id))
+        # Update event atomically checking base version
+        cur = conn.execute("""
+            UPDATE events SET guest_count = ?, setting = ?, active_scenario_version = ? 
+            WHERE id = ? AND active_scenario_version = ?;
+        """, (new_guests, setting, new_version, event_id, old_version))
+        if cur.rowcount == 0:
+            raise ValueError(f"Stale proposal rejected: Base version v{old_version} was modified concurrently.")
 
         if new_date:
             conn.execute("UPDATE events SET event_date = ? WHERE id = ?;", (new_date, event_id))
@@ -772,7 +817,8 @@ def revert_scenario_version(
             VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?);
         """, (new_sc_id, event_id, new_version, f"Revert to v{target_version}: {reason}", target_sc["guest_count"], target_sc["target_budget_paise"], target_sc["setting"], now_str))
 
-        # Re-insert items with preserved payments
+        # Re-insert items without copying stale historical paid balances
+        # Actual cash allocations are computed dynamically from the immutable payments ledger
         for idx, it in enumerate(target_items):
             item_id = f"item-{event_id}-v{new_version}-{idx+1}-{uuid.uuid4().hex[:6]}"
             conn.execute("""
@@ -789,7 +835,7 @@ def revert_scenario_version(
                 it["tax_rate_bps"],
                 it["approval_state"],
                 it["deposit_required_paise"],
-                it["paid_amount_paise"],
+                0,  # Cash paid is derived from payments table, preventing financial drift
                 it["deposit_due_date"],
                 it["notes"],
             ))
@@ -825,6 +871,25 @@ def record_payment(
     payment_id = f"pay-{uuid.uuid4().hex[:10]}"
 
     with get_connection(target_path) as conn:
+        # Cross-event tenant validation
+        evt = conn.execute("SELECT id FROM events WHERE id = ?;", (event_id,)).fetchone()
+        if not evt:
+            raise ValueError(f"Event {event_id} not found")
+
+        if commitment_id:
+            comm = conn.execute("SELECT id FROM vendor_commitments WHERE id = ? AND event_id = ?;", (commitment_id, event_id)).fetchone()
+            if not comm:
+                raise ValueError(f"Commitment '{commitment_id}' not found for event '{event_id}'")
+
+        if budget_item_id:
+            b_item = conn.execute("""
+                SELECT b.id FROM budget_items b 
+                JOIN scenarios s ON b.scenario_id = s.id 
+                WHERE b.id = ? AND s.event_id = ?;
+            """, (budget_item_id, event_id)).fetchone()
+            if not b_item:
+                raise ValueError(f"Budget item '{budget_item_id}' not found for event '{event_id}'")
+
         conn.execute("""
             INSERT INTO payments (id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, paid_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?);
@@ -832,8 +897,8 @@ def record_payment(
 
         if commitment_id:
             conn.execute("""
-                UPDATE vendor_commitments SET paid_amount_paise = paid_amount_paise + ? WHERE id = ?;
-            """, (amount_paise, commitment_id))
+                UPDATE vendor_commitments SET paid_amount_paise = paid_amount_paise + ? WHERE id = ? AND event_id = ?;
+            """, (amount_paise, commitment_id, event_id))
 
         if budget_item_id:
             conn.execute("""
@@ -858,6 +923,7 @@ def approve_vendor_quote_in_db(
     deposit_due_date: Optional[str] = None,
     notes: Optional[str] = None,
     supersedes_item_id: Optional[str] = None,
+    supersedes_item_ids: Optional[List[str]] = None,
     idempotency_key: Optional[str] = None,
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -866,7 +932,7 @@ def approve_vendor_quote_in_db(
     1. Recomputes exact line items and tiered math with taxes.
     2. Enforces idempotency against retried approvals.
     3. Prevents double-counting by superseding matching estimated items.
-    4. Separates deposit obligation from paid cash.
+    4. Records deposit obligation strictly on commitment level to prevent multiplication.
     """
     target_path = db_path or get_db_path()
     now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -887,11 +953,14 @@ def approve_vendor_quote_in_db(
         total_quote_paise = 0
         new_item_ids = []
 
-        # Mark superseded estimated item to eliminate double-counting
-        if supersedes_item_id:
+        # Mark superseded estimated items to eliminate double-counting
+        if supersedes_item_ids:
+            for s_id in supersedes_item_ids:
+                conn.execute("UPDATE budget_items SET approval_state = 'REPLACED' WHERE id = ?;", (s_id,))
+        elif supersedes_item_id:
             conn.execute("UPDATE budget_items SET approval_state = 'REPLACED' WHERE id = ?;", (supersedes_item_id,))
         else:
-            # Auto-supersede an estimated item in the same category if name matches or only 1 exists
+            # Auto-supersede estimated items in the same category
             conn.execute("""
                 UPDATE budget_items SET approval_state = 'REPLACED'
                 WHERE scenario_id = ? AND category = ? AND approval_state = 'ESTIMATED';
@@ -908,9 +977,11 @@ def approve_vendor_quote_in_db(
 
             item_id = f"item-quote-{uuid.uuid4().hex[:10]}"
             new_item_ids.append(item_id)
+            # Item deposit obligation is 0 to avoid multiplication across multi-item quotes;
+            # the authoritative deposit obligation is held on the vendor_commitments record.
             conn.execute("""
                 INSERT INTO budget_items (id, scenario_id, category, name, pricing_model, unit_cost_paise, step_capacity, tax_rate_bps, approval_state, deposit_required_paise, paid_amount_paise, deposit_due_date, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED', ?, 0, ?, ?);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED', 0, 0, ?, ?);
             """, (
                 item_id,
                 scenario_id,
@@ -920,7 +991,6 @@ def approve_vendor_quote_in_db(
                 unit,
                 cap,
                 tax_rate,
-                advance_deposit_paise,
                 deposit_due_date,
                 notes,
             ))
@@ -1000,17 +1070,23 @@ def list_incidents(event_id: str, db_path: Optional[str] = None) -> List[Dict[st
         return [dict(r) for r in rows]
 
 
-def update_task_status(task_id: str, status: str, db_path: Optional[str] = None) -> bool:
+def update_task_status(task_id: str, status: str, event_id: Optional[str] = None, db_path: Optional[str] = None) -> bool:
     target_path = db_path or get_db_path()
     with get_connection(target_path) as conn:
-        cur = conn.execute("UPDATE tasks SET status = ? WHERE id = ?;", (status, task_id))
+        if event_id:
+            cur = conn.execute("UPDATE tasks SET status = ? WHERE id = ? AND event_id = ?;", (status, task_id, event_id))
+        else:
+            cur = conn.execute("UPDATE tasks SET status = ? WHERE id = ?;", (status, task_id))
         conn.commit()
         return cur.rowcount > 0
 
 
-def update_runbook_status(cue_id: str, status: str, db_path: Optional[str] = None) -> bool:
+def update_runbook_status(cue_id: str, status: str, event_id: Optional[str] = None, db_path: Optional[str] = None) -> bool:
     target_path = db_path or get_db_path()
     with get_connection(target_path) as conn:
-        cur = conn.execute("UPDATE runbook_cues SET status = ? WHERE id = ?;", (status, cue_id))
+        if event_id:
+            cur = conn.execute("UPDATE runbook_cues SET status = ? WHERE id = ? AND event_id = ?;", (status, cue_id, event_id))
+        else:
+            cur = conn.execute("UPDATE runbook_cues SET status = ? WHERE id = ?;", (status, cue_id))
         conn.commit()
         return cur.rowcount > 0

@@ -1,23 +1,112 @@
-# Python
+# ==============================================================================
+# Python & Bytecode
+# ==============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ==============================================================================
+# Virtual Environments
+# ==============================================================================
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# ==============================================================================
+# Testing, Coverage & Playwright
+# ==============================================================================
 .pytest_cache/
 .coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
 htmlcov/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# ==============================================================================
+# Databases, Migrations & Local State
+# ==============================================================================
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
+*.sqlite3
 planqira.db
 planqira.db-journal
+planqira.db-wal
+planqira.db-shm
 
-# Environment variables
+# ==============================================================================
+# Environment Variables & Secrets
+# ==============================================================================
 .env
 .env.local
 .env.*.local
+.env.production
+.env.staging
 !.env.example
+*.pem
+*.key
+*.cert
+*.crt
+secrets/
 
-# OS & Editor
+# ==============================================================================
+# Logs & Temporary Files
+# ==============================================================================
+*.log
+*.tmp
+*.temp
+scratch/
+tmp/
+
+# ==============================================================================
+# Operating System & IDE Specific
+# ==============================================================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
-.vscode/
+desktop.ini
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~

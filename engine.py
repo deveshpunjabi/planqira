@@ -83,11 +83,14 @@ def evaluate_event_solvency(
     contingency_bps: int,  # 1000 = 10.00%
     line_items: List[Dict[str, Any]],
     guest_count: int,
+    payments: Optional[List[Dict[str, Any]]] = None,
+    vendor_commitments: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Evaluates complete budget ledger in integer paise.
     Strictly validates budget constraints.
     Separates Approval State (ESTIMATED/QUOTED/APPROVED/REJECTED/REPLACED) from Payment Tracking (PAID/PARTIAL/UNPAID).
+    Authoritative cash paid is derived from the payments ledger.
     Never scales down items to fake 100% affordability; reports exact SURPLUS or DEFICIT.
     """
     if target_budget_paise < 0:
@@ -102,9 +105,41 @@ def evaluate_event_solvency(
 
     by_approval = {"ESTIMATED": 0, "QUOTED": 0, "APPROVED": 0, "REJECTED": 0, "REPLACED": 0}
     by_payment = {"UNPAID": 0, "PARTIAL": 0, "PAID": 0}
-    total_paid_paise = 0
-    total_deposit_required_paise = 0
     total_approved_commitments_paise = 0
+
+    # 1. Authoritative payments derivation
+    if payments is not None:
+        total_paid_paise = sum(int(p.get("amount_paise", 0)) for p in payments)
+        item_payments: Dict[str, int] = defaultdict(int)
+        allocated_sum = 0
+        for p in payments:
+            amt = int(p.get("amount_paise", 0))
+            b_id = p.get("budget_item_id")
+            c_id = p.get("commitment_id")
+            if b_id:
+                item_payments[b_id] += amt
+                allocated_sum += amt
+            elif c_id:
+                allocated_sum += amt
+        unallocated_paid_paise = max(0, total_paid_paise - allocated_sum)
+    else:
+        total_paid_paise = sum(int(item.get("paid_amount_paise", 0)) for item in line_items)
+        unallocated_paid_paise = 0
+        item_payments = {item.get("id", ""): int(item.get("paid_amount_paise", 0)) for item in line_items}
+
+    # 2. Deposit obligation derivation
+    if vendor_commitments is not None:
+        total_deposit_required_paise = sum(
+            int(v.get("deposit_required_paise", 0))
+            for v in vendor_commitments
+            if v.get("approval_state") == "APPROVED"
+        )
+    else:
+        total_deposit_required_paise = sum(
+            int(item.get("deposit_required_paise", 0))
+            for item in line_items
+            if item.get("approval_state") == "APPROVED"
+        )
 
     evaluated_items = []
     total_projected_paise = 0
@@ -129,12 +164,9 @@ def evaluate_event_solvency(
         if approval == "APPROVED":
             total_approved_commitments_paise += calc["total_paise"]
 
-        deposit_req = item.get("deposit_required_paise", 0)
-        total_deposit_required_paise += deposit_req
-
-        # Payment ledger tracking
-        paid = item.get("paid_amount_paise", 0)
-        total_paid_paise += paid
+        # Item-specific cash paid from ledger or snapshot
+        item_id = item.get("id")
+        paid = item_payments.get(item_id, item.get("paid_amount_paise", 0)) if item_id else item.get("paid_amount_paise", 0)
 
         pay_status: PaymentStatus
         if paid >= calc["total_paise"] and calc["total_paise"] > 0:
@@ -149,13 +181,15 @@ def evaluate_event_solvency(
         evaluated_items.append({
             **item,
             **calc,
+            "paid_amount_paise": paid,
             "calculated_payment_status": pay_status,
         })
 
     total_required_paise = contingency_paise + total_projected_paise
     variance_paise = target_budget_paise - total_required_paise
     solvency_status = "SOLVENT" if variance_paise >= 0 else "DEFICIT"
-    total_outstanding_paise = max(0, total_projected_paise - total_paid_paise)
+    total_outstanding_paise = max(0, total_approved_commitments_paise - total_paid_paise)
+    projected_outstanding_paise = max(0, total_projected_paise - total_paid_paise)
     remaining_budget_paise = max(0, variance_paise)
 
     return {
@@ -167,7 +201,9 @@ def evaluate_event_solvency(
         "total_deposit_required_paise": total_deposit_required_paise,
         "total_required_paise": total_required_paise,
         "total_paid_paise": total_paid_paise,
+        "unallocated_paid_paise": unallocated_paid_paise,
         "total_outstanding_paise": total_outstanding_paise,
+        "projected_outstanding_paise": projected_outstanding_paise,
         "remaining_budget_paise": remaining_budget_paise,
         "variance_paise": variance_paise,
         "solvency_status": solvency_status,

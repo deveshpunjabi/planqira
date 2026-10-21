@@ -40,108 +40,192 @@
     </div>
   </header>
 
-  <!-- Event Header Strip -->
-  <section class="event-header-strip">
-    <div class="event-title-row">
-      <h1 class="event-main-title" id="headerEventTitle">Loading Celebration...</h1>
-      <div>
-        <span id="metaVersionBadge" class="status-badge badge-neutral">Scenario v1</span>
-        <button class="btn btn-sm" style="margin-left: 0.5rem;" onclick="openRevertModal()">Revert Scenario</button>
+  <!-- Two-Column Persistent Layout -->
+  <div class="dashboard-layout">
+    
+    <!-- Persistent Left Sidebar Navigation (235px wide) -->
+    <aside class="dashboard-sidebar">
+      <div class="sidebar-nav-group">
+        <div class="sidebar-nav-title">Workspaces</div>
+        <button id="navBtnOverview" class="sidebar-btn active" onclick="switchTab('tabOverview')">
+          <span class="sidebar-btn-icon">📊</span> 01. Overview
+        </button>
+        <button id="navBtnIdeas" class="sidebar-btn" onclick="switchTab('tabIdeas')">
+          <span class="sidebar-btn-icon">💡</span> 02. Creative Ideas
+        </button>
+        <button id="navBtnBudget" class="sidebar-btn" onclick="switchTab('tabBudget')">
+          <span class="sidebar-btn-icon">💰</span> 03. Budget & Vendors
+        </button>
+        <button id="navBtnTimeline" class="sidebar-btn" onclick="switchTab('tabTimeline')">
+          <span class="sidebar-btn-icon">⏱️</span> 04. Timeline & Tasks
+        </button>
+        <button id="navBtnEventDay" class="sidebar-btn" onclick="switchTab('tabEventDay')">
+          <span class="sidebar-btn-icon">🎪</span> 05. Event Day
+        </button>
+        <button id="navBtnScenario" class="sidebar-btn" onclick="switchTab('tabScenario')">
+          <span class="sidebar-btn-icon">🔬</span> 06. Scenario Lab
+        </button>
       </div>
-    </div>
-    <div class="event-meta-line">
-      <span class="event-meta-item" id="metaTypeCity">-</span>
-      <span>•</span>
-      <span class="event-meta-item" id="metaDateTime">-</span>
-      <span>•</span>
-      <span class="event-meta-item" id="metaGuests">-</span>
-    </div>
-  </section>
 
-  <!-- Financial Aligned Summary Strip -->
-  <section class="financial-strip">
-    <div class="fin-metric">
-      <span class="fin-label">Target Budget</span>
-      <span class="fin-value" id="finBudget">₹0</span>
-      <span class="fin-sub">Allocated funds</span>
-    </div>
-    <div class="fin-divider"></div>
+      <div class="sidebar-bottom-actions">
+        <div class="sidebar-nav-title">Exports & Actions</div>
+        <button class="btn btn-sm" onclick="exportFile('csv')" title="Download CSV ledger">
+          📥 CSV Ledger
+        </button>
+        <button class="btn btn-sm" onclick="exportFile('ics')" title="Export ICS calendar">
+          📅 ICS Calendar
+        </button>
+        <button class="btn btn-sm" onclick="window.print()" title="Print complete plan">
+          🖨️ Print Summary
+        </button>
+      </div>
+    </aside>
 
-    <div class="fin-metric">
-      <span class="fin-label">10% Contingency Reserve</span>
-      <span class="fin-value" id="finReserve">₹0</span>
-      <span class="fin-sub">Emergency buffer</span>
-    </div>
-    <div class="fin-divider"></div>
+    <!-- Main Content Area -->
+    <div class="dashboard-content-area">
 
-    <div class="fin-metric">
-      <span class="fin-label">Projected Spend</span>
-      <span class="fin-value" id="finProjected">₹0</span>
-      <span class="fin-sub">Active line items</span>
-    </div>
-    <div class="fin-divider"></div>
+      <!-- Event Header Strip -->
+      <section class="event-header-strip">
+        <div class="event-title-row">
+          <h1 class="event-main-title" id="headerEventTitle">Loading Celebration...</h1>
+          <div>
+            <span id="metaVersionBadge" class="status-badge badge-neutral">Scenario v1</span>
+            <button class="btn btn-sm" style="margin-left: 0.5rem;" onclick="openRevertModal()">Revert Scenario</button>
+          </div>
+        </div>
+        <div class="event-meta-line">
+          <span class="event-meta-item" id="metaTypeCity">-</span>
+          <span>•</span>
+          <span class="event-meta-item" id="metaDateTime">-</span>
+          <span>•</span>
+          <span class="event-meta-item" id="metaGuests">-</span>
+        </div>
+      </section>
 
-    <div class="fin-metric">
-      <span class="fin-label">Approved Contracts</span>
-      <span class="fin-value" id="finCommitted" style="color: var(--status-green);">₹0</span>
-      <span class="fin-sub">Locked commitments</span>
-    </div>
-    <div class="fin-divider"></div>
+      <!-- Financial Aligned Summary Strip -->
+      <section class="financial-strip">
+        <div class="fin-metric">
+          <span class="fin-label">Target Budget</span>
+          <span class="fin-value" id="finBudget">₹0</span>
+          <span class="fin-sub">Allocated funds</span>
+        </div>
+        <div class="fin-divider"></div>
 
-    <div class="fin-metric">
-      <span class="fin-label">Actual Cash Paid</span>
-      <span class="fin-value" id="finPaid" style="color: var(--status-green);">₹0</span>
-      <span class="fin-sub">Settled advances</span>
-    </div>
-    <div class="fin-divider"></div>
+        <div class="fin-metric">
+          <span class="fin-label">10% Contingency Reserve</span>
+          <span class="fin-value" id="finReserve">₹0</span>
+          <span class="fin-sub">Emergency buffer</span>
+        </div>
+        <div class="fin-divider"></div>
 
-    <div class="fin-metric">
-      <span class="fin-label">Outstanding Payable</span>
-      <span class="fin-value" id="finOutstanding">₹0</span>
-      <span class="fin-sub">Pending settlement</span>
-    </div>
-    <div class="fin-divider"></div>
+        <div class="fin-metric">
+          <span class="fin-label">Projected Spend</span>
+          <span class="fin-value" id="finProjected">₹0</span>
+          <span class="fin-sub">Active line items</span>
+        </div>
+        <div class="fin-divider"></div>
 
-    <div class="fin-metric">
-      <span class="fin-label">Solvency Balance</span>
-      <span class="fin-value" id="finVariance">₹0</span>
-      <span id="finSolvencyStatus" class="status-badge badge-green" style="margin-top: 0.15rem; width: fit-content;">SOLVENT</span>
-    </div>
-  </section>
+        <div class="fin-metric">
+          <span class="fin-label">Approved Contracts</span>
+          <span class="fin-value" id="finCommitted" style="color: var(--status-green);">₹0</span>
+          <span class="fin-sub">Locked commitments</span>
+        </div>
+        <div class="fin-divider"></div>
 
-  <!-- Workspace Tabs -->
-  <nav class="tabs-navigation">
-    <button class="tab-button active" onclick="switchTab('tabIdeas')">01. Ideas & Concepts</button>
-    <button class="tab-button" onclick="switchTab('tabBudget')">02. Budget & Commitments</button>
-    <button class="tab-button" onclick="switchTab('tabTimeline')">03. Timeline & Operations</button>
-    <button class="tab-button" onclick="switchTab('tabScenario')">04. Scenario Lab (Decision Impact)</button>
-  </nav>
+        <div class="fin-metric">
+          <span class="fin-label">Actual Cash Paid</span>
+          <span class="fin-value" id="finPaid" style="color: var(--status-green);">₹0</span>
+          <span class="fin-sub">Settled advances</span>
+        </div>
+        <div class="fin-divider"></div>
 
-  <!-- Main Workspaces -->
+        <div class="fin-metric">
+          <span class="fin-label">Outstanding Payable</span>
+          <span class="fin-value" id="finOutstanding">₹0</span>
+          <span class="fin-sub">Pending settlement</span>
+        </div>
+        <div class="fin-divider"></div>
+
+        <div class="fin-metric">
+          <span class="fin-label">Solvency Balance</span>
+          <span class="fin-value" id="finVariance">₹0</span>
+          <span id="finSolvencyStatus" class="status-badge badge-green" style="margin-top: 0.15rem; width: fit-content;">SOLVENT</span>
+        </div>
+      </section>
+
+      <!-- Main Workspaces -->
   <main class="workspace-main">
 
     <!-- Deficit Banner -->
     <div id="deficitBanner" class="callout callout-red" style="display: none;">
-      <strong>Solvency Deficit Detected:</strong> Total required spend (projected costs + 10% contingency) exceeds your target budget. Open <em>04. Scenario Lab</em> to preview headcount scaling or scope trade-offs to balance the plan.
+      <strong>Solvency Deficit Detected:</strong> Total required spend (projected costs + 10% contingency) exceeds your target budget. Open <em>06. Scenario Lab</em> to preview headcount scaling or scope trade-offs to balance the plan.
     </div>
 
-    <!-- 01. IDEAS & CONCEPTS WORKSPACE -->
-    <section id="tabIdeas" class="workspace-pane active">
-      <div class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">Curated Creative Concepts</h2>
-            <div class="panel-subtitle">Tailored sensory blueprints, color swatches, signature moments, and cost-saving alternatives.</div>
+    <!-- 01. MISSION OVERVIEW WORKSPACE -->
+    <section id="tabOverview" class="workspace-pane active">
+      <div class="grid-2">
+        <!-- Solvency Health & Cash Card -->
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Financial Health & Solvency State</h2>
+              <div class="panel-subtitle">Strict integer-paise solvency accounting with zero rounding drift.</div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="background: var(--surface-subtle); padding: 1rem; border-radius: 4px;">
+              <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Solvency Diagnostic</div>
+              <div id="overviewSolvencyCallout" style="font-family: var(--font-serif); font-size: 1.25rem; font-weight: 700; margin-top: 0.25rem; color: var(--status-green);">
+                Plan Balanced & Solvent
+              </div>
+              <div id="overviewSolvencyDetail" style="font-size: 0.825rem; color: var(--text-secondary); margin-top: 0.35rem;">
+                Target budget includes a dedicated 10% emergency buffer with unallocated surplus available for contingency.
+              </div>
+            </div>
+
+            <div class="grid-2" style="font-size: 0.85rem; margin-top: 0.5rem;">
+              <div><span style="color: var(--text-muted);">Contingency Ringfence:</span> <strong id="overviewReserve">₹0</strong></div>
+              <div><span style="color: var(--text-muted);">Approved Contracts:</span> <strong id="overviewCommitted">₹0</strong></div>
+              <div><span style="color: var(--text-muted);">Actual Settled Cash:</span> <strong id="overviewPaid" style="color: var(--status-green);">₹0</strong></div>
+              <div><span style="color: var(--text-muted);">Remaining Obligation:</span> <strong id="overviewOutstanding">₹0</strong></div>
+            </div>
           </div>
         </div>
-        <div class="grid-3" id="themesContainer"></div>
+
+        <!-- Operational Pulse Card -->
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Celebration Operational Pulse</h2>
+              <div class="panel-subtitle">Active parameters, readiness milestone, and rapid navigation.</div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+            <div class="grid-2" style="font-size: 0.85rem;">
+              <div><span style="color: var(--text-muted);">Target City:</span> <strong id="overviewCity">-</strong></div>
+              <div><span style="color: var(--text-muted);">Event Setting:</span> <strong id="overviewSetting">-</strong></div>
+              <div><span style="color: var(--text-muted);">Planned Date:</span> <strong id="overviewDate">-</strong></div>
+              <div><span style="color: var(--text-muted);">Active Version:</span> <strong id="overviewVersion">-</strong></div>
+            </div>
+
+            <div style="margin-top: 0.75rem; border-top: 1px solid var(--border-subtle); padding-top: 0.75rem;">
+              <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 0.5rem;">Direct Workspace Jump</div>
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <button class="btn btn-sm" onclick="switchTab('tabBudget')">💰 Budget & Vendors</button>
+                <button class="btn btn-sm" onclick="switchTab('tabTimeline')">⏱️ Tasks & Timeline</button>
+                <button class="btn btn-sm" onclick="switchTab('tabEventDay')">🎪 Event Day Runbook</button>
+                <button class="btn btn-sm" onclick="switchTab('tabScenario')">🔬 Scenario Lab</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- Audit Trail Preview -->
-      <div class="panel">
+      <!-- Immutable Audit Trail in Overview -->
+      <div class="panel" style="margin-top: 1.5rem;">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">Immutable Audit Trail</h2>
+            <h2 class="panel-title">Immutable Audit Trail (Recent Activity)</h2>
             <div class="panel-subtitle">Append-only relational ledger recording decisions, scenario mutations, and contract approvals.</div>
           </div>
         </div>
@@ -160,7 +244,20 @@
       </div>
     </section>
 
-    <!-- 02. BUDGET & COMMITMENTS WORKSPACE -->
+    <!-- 02. IDEAS & CONCEPTS WORKSPACE -->
+    <section id="tabIdeas" class="workspace-pane">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Curated Creative Concepts</h2>
+            <div class="panel-subtitle">Tailored sensory blueprints, color swatches, signature moments, and cost-saving alternatives.</div>
+          </div>
+        </div>
+        <div class="grid-3" id="themesContainer"></div>
+      </div>
+    </section>
+
+    <!-- 03. BUDGET & COMMITMENTS WORKSPACE -->
     <section id="tabBudget" class="workspace-pane">
       <div class="panel">
         <div class="panel-header">
@@ -242,53 +339,53 @@
       </div>
     </section>
 
-    <!-- 03. TIMELINE & OPERATIONS WORKSPACE -->
+    <!-- 04. TIMELINE & TASKS WORKSPACE -->
     <section id="tabTimeline" class="workspace-pane">
-      <div class="grid-2">
-        <!-- T-Minus Tasks -->
-        <div class="panel">
-          <div class="panel-header">
-            <div>
-              <h2 class="panel-title">T-Minus Preparation Tasks</h2>
-              <div class="panel-subtitle">Topological sequence with headcount sensitivity flags.</div>
-            </div>
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">T-Minus Preparation Timeline & Task Dependencies</h2>
+            <div class="panel-subtitle">Topological sequence with headcount sensitivity flags and reverification alerts.</div>
           </div>
-          <table class="table-clean">
-            <thead>
-              <tr>
-                <th>Timeframe</th>
-                <th>Task Title</th>
-                <th>Owner</th>
-                <th>Due Date</th>
-                <th>Priority</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="tasksTableBody"></tbody>
-          </table>
         </div>
+        <table class="table-clean">
+          <thead>
+            <tr>
+              <th>Timeframe</th>
+              <th>Task Title</th>
+              <th>Owner</th>
+              <th>Due Date</th>
+              <th>Priority</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="tasksTableBody"></tbody>
+        </table>
+      </div>
+    </section>
 
-        <!-- Minute-by-Minute Runbook -->
-        <div class="panel">
-          <div class="panel-header">
-            <div>
-              <h2 class="panel-title">Day-Of Runbook (Minute-by-Minute)</h2>
-              <div class="panel-subtitle">Front-of-House (Guests) vs Back-of-House (Crew/Vendors).</div>
-            </div>
+    <!-- 05. EVENT DAY OPERATIONS WORKSPACE -->
+    <section id="tabEventDay" class="workspace-pane">
+      <!-- Minute-by-Minute Runbook -->
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Day-Of Runbook (Minute-by-Minute)</h2>
+            <div class="panel-subtitle">Front-of-House (Guests) vs Back-of-House (Crew/Vendors).</div>
           </div>
-          <table class="table-clean">
-            <thead>
-              <tr>
-                <th>Time Slot</th>
-                <th>Front of House</th>
-                <th>Back of House</th>
-                <th>Lead Role</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="runbookTableBody"></tbody>
-          </table>
         </div>
+        <table class="table-clean">
+          <thead>
+            <tr>
+              <th>Time Slot</th>
+              <th>Front of House</th>
+              <th>Back of House</th>
+              <th>Lead Role</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="runbookTableBody"></tbody>
+        </table>
       </div>
 
       <!-- Contingency Protocols Switchboard -->
@@ -350,7 +447,7 @@
       </div>
     </section>
 
-    <!-- 04. SCENARIO LAB (DECISION IMPACT ENGINE) -->
+    <!-- 06. SCENARIO LAB (DECISION IMPACT ENGINE) -->
     <section id="tabScenario" class="workspace-pane">
       <div class="scenario-box">
         <div style="display: flex; justify-content: space-between; align-items: baseline;">
@@ -450,6 +547,8 @@
     </section>
 
   </main>
+  </div> <!-- .dashboard-content-area -->
+  </div> <!-- .dashboard-layout -->
 
   <!-- ================================================================ -->
   <!-- MODALS -->
@@ -520,6 +619,27 @@
         <div class="form-group">
           <label class="form-label">Target Budget (Rupees ₹)</label>
           <input type="number" id="newEvtBudget" class="form-control" value="1000000" min="10000" step="50000">
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Dietary Preference</label>
+            <select id="newEvtDietary" class="form-control">
+              <option value="standard">Standard Gourmet Multi-Cuisine</option>
+              <option value="jain">Strict Jain & Sattvic Pure Veg</option>
+              <option value="vegan">100% Plant-Based Artisanal Vegan</option>
+              <option value="halal">Certified Halal Mughlai Gourmet</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Aesthetic Style</label>
+            <select id="newEvtStyle" class="form-control">
+              <option value="royal">Royal Heritage & Regal Grandeur</option>
+              <option value="minimalist">Modern Minimalist & Architectural</option>
+              <option value="garden">Botanical Bohemian & Lush Garden</option>
+              <option value="contemporary">Contemporary Luxe & High-Glam</option>
+            </select>
+          </div>
         </div>
       </div>
       <div class="modal-card-footer">

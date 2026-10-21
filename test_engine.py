@@ -352,7 +352,7 @@ def test_scenario_commit_persists_task_and_vendor_invalidation():
     assert len(reconfirm_vendors) > 0
 
 
-def test_scenario_commit_preserves_completed_tasks_and_payments():
+def test_scenario_commit_flags_completed_tasks_for_reverification():
     evts = list_events()
     evt_id = evts[0]["id"]
     initial_full = get_event_by_id(evt_id)
@@ -363,20 +363,21 @@ def test_scenario_commit_preserves_completed_tasks_and_payments():
     assert len(done_tasks) > 0
     done_id = done_tasks[0]["id"]
 
-    # Commit scenario
+    # Commit scenario with the completed task invalidated due to headcount shift
     commit_scenario_version(
         event_id=evt_id,
         new_guests=280,
         new_budget_items=initial_full["budget_items"],
-        note="Small expansion",
+        note="Headcount expansion from 250 to 280",
         base_version=base_ver,
-        invalidated_task_ids=[done_id],  # Even if mistakenly passed, done task must be retained
+        invalidated_task_ids=[done_id],
     )
 
     updated_full = get_event_by_id(evt_id)
     retained_task = [t for t in updated_full["tasks"] if t["id"] == done_id][0]
-    # Status remains DONE
-    assert retained_task["status"] == "DONE"
+    # Completed task whose precondition shifted must transition to NEEDS_REVIEW
+    assert retained_task["status"] == "NEEDS_REVIEW"
+    assert "previously DONE" in retained_task["reverification_reason"]
 
 
 def test_scenario_revert_creates_forward_revision():
@@ -580,6 +581,9 @@ def test_public_homepage_and_dashboard_routes(client):
     assert "Planqira" in res_dash.text
     assert "app.js" in res_dash.text
     assert "Scenario Lab" in res_dash.text
+    assert "dashboard-sidebar" in res_dash.text
+    assert "tabOverview" in res_dash.text
+    assert "tabEventDay" in res_dash.text
 
     # Verify /api/health
     res_health = client.get("/api/health")
@@ -607,4 +611,194 @@ def test_simulation_endpoint_with_dag_invalidations(client):
     assert len(data["dag_impacts"]) > 0
     assert "tradeoffs" in data
     assert len(data["tradeoffs"]) > 0
+
+
+# =====================================================================
+# 10. REGRESSION & AUDIT VERIFICATION TESTS
+# =====================================================================
+
+def test_payment_ledger_unallocated_and_allocated():
+    """Verifies that payments ledger is the authoritative source of truth for cash paid."""
+    line_items = [
+        {"id": "item-1", "pricing_model": "FIXED", "unit_cost_paise": 100000, "paid_amount_paise": 0},
+        {"id": "item-2", "pricing_model": "FIXED", "unit_cost_paise": 200000, "paid_amount_paise": 0},
+    ]
+    # 2 allocated payments and 1 unallocated payment
+    payments = [
+        {"amount_paise": 50000, "budget_item_id": "item-1"},
+        {"amount_paise": 100000, "budget_item_id": "item-2"},
+        {"amount_paise": 25000, "budget_item_id": None, "commitment_id": None},
+    ]
+    solvency = evaluate_event_solvency(
+        target_budget_paise=500000,
+        contingency_bps=1000,
+        line_items=line_items,
+        guest_count=100,
+        payments=payments,
+    )
+    # Total paid is 50,000 + 100,000 + 25,000 = 175,000 paise
+    assert solvency["total_paid_paise"] == 175000
+    assert solvency["unallocated_paid_paise"] == 25000
+    assert solvency["items"][0]["paid_amount_paise"] == 50000
+    assert solvency["items"][1]["paid_amount_paise"] == 100000
+
+
+def test_revert_scenario_retains_ledger_payments():
+    """Verifies that reverting a scenario never loses payments or creates financial drift."""
+    evts = list_events()
+    evt_id = evts[0]["id"]
+    initial_full = get_event_by_id(evt_id)
+    v1 = initial_full["event"]["active_scenario_version"]
+
+    # Record a payment in v1
+    pay_res = record_payment(
+        event_id=evt_id,
+        amount_paise=5000000,  # ₹50,000
+        payment_method="UPI",
+        reference_note="Advance catering token",
+    )
+    assert pay_res["success"] is True
+
+    # Commit v2
+    commit_scenario_version(
+        event_id=evt_id,
+        new_guests=300,
+        new_budget_items=initial_full["budget_items"],
+        note="Increase headcount to 300",
+        base_version=v1,
+    )
+    v2_full = get_event_by_id(evt_id)
+    assert v2_full["event"]["active_scenario_version"] == v1 + 1
+
+    # Revert back to v1
+    revert_res = revert_scenario_version(
+        event_id=evt_id,
+        target_version=v1,
+        reason="Client decided against guest expansion",
+    )
+    assert revert_res["success"] is True
+
+    reverted_full = get_event_by_id(evt_id)
+    # Check that payment still exists and matches in payments list
+    all_payments = reverted_full["payments"]
+    matching_payment = [p for p in all_payments if p["amount_paise"] == 5000000]
+    assert len(matching_payment) == 1
+
+    # Evaluate solvency with reverted items and payments
+    solvency = evaluate_event_solvency(
+        target_budget_paise=reverted_full["event"]["target_budget_paise"],
+        contingency_bps=reverted_full["event"]["contingency_bps"],
+        line_items=reverted_full["budget_items"],
+        guest_count=reverted_full["event"]["guest_count"],
+        payments=reverted_full["payments"],
+    )
+    # Paid cash includes the recorded payment plus initial seed payment
+    assert solvency["total_paid_paise"] >= 5000000
+
+
+def test_cross_event_ownership_isolation(client):
+    """Verifies strict cross-event scoping on tasks, runbooks, and payments."""
+    evts = client.get("/api/events").json()["events"]
+    evt_a_id = evts[0]["id"]
+    evt_b_id = evts[1]["id"]
+
+    evt_a_full = get_event_by_id(evt_a_id)
+    task_a_id = evt_a_full["tasks"][0]["id"]
+
+    # Attempting to patch task_a through event B's endpoint must return 404
+    patch_res = client.patch(f"/api/events/{evt_b_id}/tasks/{task_a_id}", json={"status": "DONE"})
+    assert patch_res.status_code == 404
+
+    # Attempting to record payment on Event B referencing Event A's commitment must raise 400
+    comm_a_id = evt_a_full["vendors"][0]["id"]
+    pay_res = client.post(
+        f"/api/events/{evt_b_id}/record-payment",
+        json={
+            "amount_paise": 1000000,
+            "payment_method": "NEFT",
+            "reference_note": "Cross event attack",
+            "commitment_id": comm_a_id,
+        }
+    )
+    assert pay_res.status_code == 400
+    assert "not found for event" in pay_res.json()["detail"]
+
+
+def test_quote_negation_and_percentage_advance():
+    """Verifies that negation words are respected and percentage advances are computed accurately."""
+    quote_text = (
+        "Hi team, this is Spice Route Catering. For 200 pax, per plate charge is ₹1200/- per person. "
+        "Diesel included. No corkage fee. Free delivery. "
+        "40% advance required upon booking. 5% GST applicable."
+    )
+    parsed = parse_vendor_quote_text(quote_text, current_guest_count=200)
+    data = parsed["data"]
+
+    # Check vendor name
+    assert "Spice Route" in data["vendor_name"]
+    # Check pricing model
+    assert data["extracted_items"][0]["pricing_model"] == "PER_CAPITA"
+    assert data["extracted_items"][0]["unit_cost_paise"] == 120000  # ₹1200
+
+    # Total estimated subtotal: 200 * ₹1200 = ₹240,000 (24,000,000 paise)
+    # 40% advance: 0.40 * 24,000,000 = 9,600,000 paise (₹96,000)
+    assert data["advance_deposit_paise"] == 9600000
+
+    # Check clauses: must NOT classify "diesel included" or "no corkage" as extra surcharges
+    clauses = " ".join(data["explicit_clauses_extracted"]).lower()
+    assert "diesel explicitly included" in clauses or "diesel included" in clauses
+    assert "corkage fee waived" in clauses
+    assert "delivery included" in clauses
+
+
+def test_rfc5545_exclusive_end_date_and_line_folding(client):
+    """Verifies RFC-5545 calendar compliance: exclusive end date and <= 75 octet line folding."""
+    evts = client.get("/api/events").json()["events"]
+    evt_id = evts[0]["id"]
+
+    res = client.get(f"/api/events/{evt_id}/export.ics")
+    assert res.status_code == 200
+    assert "text/calendar" in res.headers["content-type"]
+
+    ics_content = res.text
+    # All lines must be <= 75 octets
+    for line in ics_content.split("\r\n"):
+        assert len(line.encode("utf-8")) <= 75, f"Line exceeds 75 octets: {line}"
+
+    # For all-day events, DTEND must be DTSTART + 1 day
+    lines = ics_content.split("\r\n")
+    for i, line in enumerate(lines):
+        if line.startswith("DTSTART;VALUE=DATE:"):
+            start_date_str = line.split(":")[1]
+            end_line = lines[i+1]
+            if end_line.startswith("DTEND;VALUE=DATE:"):
+                end_date_str = end_line.split(":")[1]
+                # Compare integer dates
+                assert int(end_date_str) > int(start_date_str), f"DTEND ({end_date_str}) must be after DTSTART ({start_date_str})"
+
+
+def test_dietary_and_style_personalization_in_create_event():
+    """Verifies that preferences.dietary and style customize line items and tasks."""
+    payload = {
+        "title": "Aarav & Diya Heritage Wedding",
+        "event_type": "wedding",
+        "city": "Udaipur",
+        "event_date": "2026-12-10",
+        "guest_count": 200,
+        "target_budget_paise": 100000000,
+        "preferences": {
+            "dietary": "Strict Vegetarian + Jain",
+            "style": "Regal Rajputana Heritage",
+        }
+    }
+    created = create_event(payload)
+    evt_full = get_event_by_id(created["event_id"])
+
+    catering_items = [it for it in evt_full["budget_items"] if it["category"] == "Catering"]
+    assert len(catering_items) > 0
+    assert "Pure Vegetarian & Jain" in catering_items[0]["name"]
+
+    tasting_tasks = [t for t in evt_full["tasks"] if "tasting" in t["title"].lower()]
+    assert len(tasting_tasks) > 0
+    assert "Pure Veg & Jain" in tasting_tasks[0]["title"]
 

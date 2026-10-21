@@ -99,7 +99,7 @@ class SimulateRequest(BaseModel):
 
 class CommitScenarioRequest(BaseModel):
     new_guests: int = Field(..., ge=1, le=10000)
-    new_budget_items: List[Dict[str, Any]]
+    new_budget_items: Optional[List[Dict[str, Any]]] = None
     note: str = Field(..., min_length=3, max_length=200)
     base_version: int = Field(..., ge=1, description="Active version this proposal was simulated against")
     new_setting: Optional[Literal["indoor", "outdoor", "hybrid"]] = None
@@ -124,6 +124,7 @@ class ApproveQuoteRequest(BaseModel):
     deposit_due_date: Optional[str] = None
     notes: Optional[str] = None
     supersedes_item_id: Optional[str] = None
+    supersedes_item_ids: Optional[List[str]] = None
     idempotency_key: Optional[str] = None
 
 
@@ -194,6 +195,8 @@ def get_event(event_id: str):
         contingency_bps=evt["contingency_bps"],
         line_items=items,
         guest_count=evt["guest_count"],
+        payments=data["payments"],
+        vendor_commitments=data["vendors"],
     )
 
     return {
@@ -318,6 +321,7 @@ def approve_quote(event_id: str, req: ApproveQuoteRequest):
             deposit_due_date=req.deposit_due_date,
             notes=req.notes,
             supersedes_item_id=req.supersedes_item_id,
+            supersedes_item_ids=req.supersedes_item_ids,
             idempotency_key=req.idempotency_key,
         )
         return result
@@ -363,7 +367,7 @@ def post_incident(event_id: str, req: CreateIncidentRequest):
 
 @app.patch("/api/events/{event_id}/tasks/{task_id}")
 def patch_task(event_id: str, task_id: str, req: UpdateTaskRequest):
-    updated = update_task_status(task_id, req.status)
+    updated = update_task_status(task_id, req.status, event_id=event_id)
     if not updated:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"success": True, "task_id": task_id, "status": req.status}
@@ -371,7 +375,7 @@ def patch_task(event_id: str, task_id: str, req: UpdateTaskRequest):
 
 @app.patch("/api/events/{event_id}/runbook/{cue_id}")
 def patch_runbook(event_id: str, cue_id: str, req: UpdateRunbookRequest):
-    updated = update_runbook_status(cue_id, req.status)
+    updated = update_runbook_status(cue_id, req.status, event_id=event_id)
     if not updated:
         raise HTTPException(status_code=404, detail="Runbook cue not found")
     return {"success": True, "cue_id": cue_id, "status": req.status}
@@ -402,6 +406,8 @@ def export_csv(event_id: str):
         contingency_bps=evt["contingency_bps"],
         line_items=items,
         guest_count=evt["guest_count"],
+        payments=data["payments"],
+        vendor_commitments=data["vendors"],
     )
 
     output = io.StringIO()
@@ -478,6 +484,22 @@ def _escape_ics_text(text: str) -> str:
     return t
 
 
+def _fold_ics_line(line: str) -> str:
+    """Folds lines at 75 octets per RFC-5545 section 3.1."""
+    if len(line.encode("utf-8")) <= 75:
+        return line
+    folded = []
+    first = True
+    while len(line.encode("utf-8")) > 75:
+        cut = 75
+        while len(line[:cut].encode("utf-8")) > 75:
+            cut -= 1
+        folded.append(line[:cut])
+        line = " " + line[cut:]
+    folded.append(line)
+    return "\r\n".join(folded)
+
+
 @app.get("/api/events/{event_id}/export.ics")
 def export_ics(event_id: str):
     data = get_event_by_id(event_id)
@@ -491,7 +513,7 @@ def export_ics(event_id: str):
     clean_title = _escape_ics_text(evt["title"])
     now_stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
 
-    lines = [
+    raw_lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
         "PRODID:-//Planqira//Precision Operations Engine//EN",
@@ -500,18 +522,26 @@ def export_ics(event_id: str):
         f"X-WR-CALNAME:Planqira - {clean_title}",
     ]
 
-    # Convert tasks to VEVENT
+    # Convert tasks to VEVENT with RFC-5545 non-inclusive exclusive DTEND
     for t in tasks:
-        due_str = t["due_date"].replace("-", "")
+        try:
+            task_dt = datetime.strptime(t["due_date"], "%Y-%m-%d")
+            start_date_str = task_dt.strftime("%Y%m%d")
+            # All-day end date must be exclusive next day per RFC-5545 3.6.1
+            end_date_str = (task_dt + timedelta(days=1)).strftime("%Y%m%d")
+        except Exception:
+            start_date_str = t["due_date"].replace("-", "")
+            end_date_str = start_date_str
+
         uid = f"task-{t['id']}@planqira.local"
         summary = _escape_ics_text(f"[{t['timeframe']}] {t['title']}")
         desc = _escape_ics_text(f"Owner: {t['owner']} | Priority: {t['priority']} | Status: {t['status']}")
-        lines.extend([
+        raw_lines.extend([
             "BEGIN:VEVENT",
             f"UID:{uid}",
             f"DTSTAMP:{now_stamp}",
-            f"DTSTART;VALUE=DATE:{due_str}",
-            f"DTEND;VALUE=DATE:{due_str}",
+            f"DTSTART;VALUE=DATE:{start_date_str}",
+            f"DTEND;VALUE=DATE:{end_date_str}",
             f"SUMMARY:{summary}",
             f"DESCRIPTION:{desc}",
             f"STATUS:{'CONFIRMED' if t['status'] == 'DONE' else 'TENTATIVE'}",
@@ -530,7 +560,7 @@ def export_ics(event_id: str):
         main_end = end_dt.strftime("%Y%m%dT%H%M00")
 
         # Main celebration master event
-        lines.extend([
+        raw_lines.extend([
             "BEGIN:VEVENT",
             f"UID:event-main-{evt['id']}@planqira.local",
             f"DTSTAMP:{now_stamp}",
@@ -545,25 +575,34 @@ def export_ics(event_id: str):
     except Exception:
         pass
 
+    try:
+        e_dt = datetime.strptime(evt_date_str, "%Y-%m-%d")
+        dt_start_date = e_dt.strftime("%Y%m%d")
+        dt_end_date = (e_dt + timedelta(days=1)).strftime("%Y%m%d")
+    except Exception:
+        dt_start_date = evt_date_str.replace("-", "")
+        dt_end_date = dt_start_date
+
     for rb in runbook:
         uid = f"runbook-{rb['id']}@planqira.local"
         summary = _escape_ics_text(f"[Runbook] {rb['time_slot']} - {rb['lead_role']}")
         desc = _escape_ics_text(f"Guest: {rb['front_of_house']} | Crew: {rb['back_of_house']}")
-        dt_date = evt_date_str.replace("-", "")
-        lines.extend([
+        raw_lines.extend([
             "BEGIN:VEVENT",
             f"UID:{uid}",
             f"DTSTAMP:{now_stamp}",
-            f"DTSTART;VALUE=DATE:{dt_date}",
-            f"DTEND;VALUE=DATE:{dt_date}",
+            f"DTSTART;VALUE=DATE:{dt_start_date}",
+            f"DTEND;VALUE=DATE:{dt_end_date}",
             f"SUMMARY:{summary}",
             f"DESCRIPTION:{desc}",
             f"STATUS:{'CONFIRMED' if rb['status'] == 'COMPLETED' else 'TENTATIVE'}",
             "END:VEVENT",
         ])
 
-    lines.append("END:VCALENDAR")
-    ics_data = "\r\n".join(lines)
+    raw_lines.append("END:VCALENDAR")
+    # Apply RFC-5545 line folding at 75 octets
+    folded_lines = [_fold_ics_line(l) for l in raw_lines]
+    ics_data = "\r\n".join(folded_lines)
     clean_slug = re.sub(r"[^a-zA-Z0-9_-]", "-", evt["title"].lower()).strip("-")
     filename = f"planqira-schedule-{clean_slug}.ics"
 

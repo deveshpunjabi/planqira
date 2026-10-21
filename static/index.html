@@ -741,8 +741,8 @@
       // Projected Outlay
       const projectedTotal = cateringTotal + tablesTotal + buffetTotal + adjustedVenueTotal + decorTotal + audioTotal;
 
-      // 10% Reserve
-      const reserve = Math.floor((projectedTotal * 1000 + 5000) / 10000);
+      // 10% Reserve: Unified to 10% of Target Budget (matching backend engine solvency evaluation)
+      const reserve = Math.floor((p.targetBudgetPaise * 1000 + 5000) / 10000);
       document.getElementById("demoReserveVal").textContent = fmtPaise(reserve);
 
       const grandTotal = projectedTotal + reserve;

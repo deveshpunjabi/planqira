@@ -139,14 +139,33 @@ def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150)
     }
 
 
+def _is_negated_or_included(concept_pattern: str, text: str) -> bool:
+    """Detects whether a concept is explicitly stated as included, free, waived, complimentary, or negated."""
+    low_text = text.lower()
+    # Split text into sentences and comma-separated clauses
+    clauses = re.split(r"[,.;\n]", low_text)
+    for c in clauses:
+        if re.search(concept_pattern, c):
+            if any(w in c for w in ["included", "inclusive", "free", "waived", "complimentary", "zero", "no ", "without"]):
+                return True
+    return False
+
+
 def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
     """
     Deterministic regex-based heuristic extractor for offline verification and testing.
     Never pretends to be live AI; extracts observable figures from text.
+    Handles negation context ("Diesel included. No corkage fee") and percentage advances ("40% advance").
     """
     # Detect vendor name
-    vendor_match = re.search(r"(?:this is|from|regards,?|team)\s+([A-Z][A-Za-z0-9\s&]+?)(?:[.,\n]|\s+catering|\s+productions|\s+sound)", text, re.IGNORECASE)
-    vendor_name = vendor_match.group(1).strip() if vendor_match else "Vendor Partner (Extracted)"
+    vendor_match = re.search(r"(?:this is|from|regards,?|team|vendor:?)\s+([A-Z][A-Za-z0-9\s&]{2,40}?)(?:[.,\n]|\s+catering|\s+productions|\s+sound|$)", text, re.IGNORECASE)
+    prefix_match = re.search(r"^([A-Z][A-Za-z0-9\s&]{2,40}?):", text.strip())
+    if vendor_match:
+        vendor_name = vendor_match.group(1).strip()
+    elif prefix_match:
+        vendor_name = prefix_match.group(1).strip()
+    else:
+        vendor_name = "Vendor Partner (Extracted)"
 
     # Detect category
     category = "General Logistics"
@@ -182,17 +201,38 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
         item_name = "Per-Plate Banquet Service"
     else:
         # Detect flat rupee amounts
+        clean_amts = []
         amounts = re.findall(r"(?:rs\.?|inr|₹)\s*(\d[\d,]*)", low)
         if amounts:
-            clean_amts = [int(a.replace(",", "")) for a in amounts if int(a.replace(",", "")) >= 1000]
+            clean_amts = [int(a.replace(",", "")) for a in amounts if int(a.replace(",", "")) >= 500]
             if clean_amts:
                 unit_cost_paise = clean_amts[0] * 100
 
-    # Advance deposit detection
+    # Calculate total estimated quote in paise for percentage advance calculation
+    if pricing_model == "PER_CAPITA":
+        total_estimated_paise = unit_cost_paise * max(1, guests)
+    else:
+        total_estimated_paise = sum(clean_amts) * 100 if clean_amts else unit_cost_paise
+
+    # Advance deposit detection: Percentage advance vs explicit currency amount
     advance_paise = 0
-    adv_match = re.search(r"(?:advance|token|deposit)(?:\s+is|\s+of)?(?:\s+rs\.?|\s+inr|\s+₹)?\s*(\d[\d,]*)", low)
-    if adv_match:
-        advance_paise = int(adv_match.group(1).replace(",", "")) * 100
+    pct_adv_match = re.search(r"(\d{1,2})\s*%\s*(?:advance|deposit|token)", low) or re.search(r"(?:advance|token|deposit)(?:\s+is|\s+of)?\s*(\d{1,2})\s*%", low)
+    if pct_adv_match:
+        pct = int(pct_adv_match.group(1))
+        advance_paise = (total_estimated_paise * pct) // 100
+    else:
+        adv_match = re.search(r"(?:advance|token|deposit)(?:\s+is|\s+of)?\s*(?:rs\.?|inr|₹)\s*(\d[\d,]*)", low)
+        if adv_match:
+            advance_paise = int(adv_match.group(1).replace(",", "")) * 100
+        else:
+            # Fallback general match only if not a percentage
+            gen_adv_match = re.search(r"(?:advance|token|deposit)(?:\s+is|\s+of)?\s*(\d[\d,]*)", low)
+            if gen_adv_match:
+                candidate_str = gen_adv_match.group(1).replace(",", "")
+                # Ensure it's not a small percentage number mistaken for currency
+                val = int(candidate_str)
+                if val >= 500:
+                    advance_paise = val * 100
 
     # Date detection
     due_date = None
@@ -200,24 +240,41 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
     if date_match:
         due_date = date_match.group(1).strip()
 
-    # Flag real explicit clauses in text
+    # Flag explicit clauses with robust negation detection
     clauses = []
     if "diesel" in low or "fuel" in low:
-        clauses.append("Kitchen fuel and generator diesel charged separately as surcharge.")
-    if "overtime" in low or "curfew" in low or "per hour" in low:
-        clauses.append("Overtime hours beyond agreed time slot incur hourly penalty fees.")
-    if "transport" in low or "km" in low:
-        clauses.append("Outstation travel/transport fees applicable beyond city radius.")
+        if _is_negated_or_included(r"diesel|fuel", low):
+            clauses.append("Kitchen fuel and generator diesel explicitly included in quote (no surcharge).")
+        else:
+            clauses.append("Kitchen fuel and generator diesel charged separately as surcharge.")
+
     if "corkage" in low or "liquor" in low:
-        clauses.append("Outside beverage corkage fee required.")
+        if _is_negated_or_included(r"corkage|liquor", low):
+            clauses.append("Outside beverage corkage fee waived / complimentary.")
+        else:
+            clauses.append("Outside beverage corkage fee required.")
+
+    if "transport" in low or "delivery" in low or "km" in low:
+        if _is_negated_or_included(r"transport|delivery", low):
+            clauses.append("Local transport and delivery included in quote.")
+        else:
+            clauses.append("Outstation travel/transport fees applicable beyond city radius.")
+
+    if "overtime" in low or "curfew" in low or "per hour" in low:
+        if _is_negated_or_included(r"overtime|curfew", low):
+            clauses.append("Flexible schedule with overtime penalties waived.")
+        else:
+            clauses.append("Overtime hours beyond agreed time slot incur hourly penalty fees.")
 
     # Questions & negotiation reply
     questions = [
-        f"Does the quoted total include full setup, breakdown, and disposal fees?",
+        "Does the quoted total include full setup, breakdown, and disposal fees?",
         f"Can you provide a line-item tax breakdown matching the quoted {tax_bps/100:.1f}% GST rate?",
     ]
     if category == "Catering":
         questions.append("Are guest tasting sessions, ceramic crockery, and serving staff included?")
+    if unit_cost_paise == 0:
+        questions.append(f"Item pricing was not specified in the quote. Please confirm the rate for {item_name} before final commitment.")
 
     negotiation_script = (
         f"Hi {vendor_name}, thank you for sending over the quote for {category}. "
@@ -225,15 +282,44 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
         f"could you confirm if the {tax_bps/100:.1f}% GST and setup logistics are all-inclusive?"
     )
 
-    items = [
-        ExtractedLineItem(
-            name=item_name,
-            pricing_model=pricing_model,
-            unit_cost_paise=unit_cost_paise,
-            step_capacity=1,
-            tax_rate_bps=tax_bps,
-        )
-    ]
+    if pricing_model != "PER_CAPITA" and len(clean_amts) > 1:
+        item_matches = list(re.finditer(r"([A-Za-z0-9\s&]{3,40}?)\s*(?:rs\.?|inr|₹)\s*([\d,]+)", text, re.IGNORECASE))
+        if item_matches and len(item_matches) > 1:
+            items = []
+            for m in item_matches:
+                lbl = m.group(1).strip()
+                lbl = re.sub(r"^.*?:\s*", "", lbl).strip()
+                amt = int(m.group(2).replace(",", ""))
+                if amt >= 500:
+                    items.append(
+                        ExtractedLineItem(
+                            name=lbl.capitalize(),
+                            pricing_model="FIXED",
+                            unit_cost_paise=amt * 100,
+                            step_capacity=1,
+                            tax_rate_bps=tax_bps,
+                        )
+                    )
+        else:
+            items = [
+                ExtractedLineItem(
+                    name=item_name,
+                    pricing_model=pricing_model,
+                    unit_cost_paise=total_estimated_paise,
+                    step_capacity=1,
+                    tax_rate_bps=tax_bps,
+                )
+            ]
+    else:
+        items = [
+            ExtractedLineItem(
+                name=item_name,
+                pricing_model=pricing_model,
+                unit_cost_paise=unit_cost_paise,
+                step_capacity=1,
+                tax_rate_bps=tax_bps,
+            )
+        ]
 
     return {
         "vendor_name": vendor_name,
