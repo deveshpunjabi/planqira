@@ -23,8 +23,12 @@ def is_postgres_configured() -> bool:
 
 
 def get_db_path() -> str:
-    """Returns the database file path, allowing dynamic test isolation."""
-    return os.getenv("PLANQIRA_DB_PATH", DB_FILE)
+    """Returns the database file path, allowing dynamic test isolation and Vercel serverless /tmp write access."""
+    if os.getenv("PLANQIRA_DB_PATH"):
+        return os.getenv("PLANQIRA_DB_PATH")
+    if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+        return "/tmp/planqira.db"
+    return DB_FILE
 
 
 def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:

@@ -613,26 +613,29 @@ def export_ics(event_id: str):
     )
 
 
-# Mount static assets & web pages
-if os.path.exists("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+# Mount static assets & web pages with absolute path resilience
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")
 def serve_index():
-    return FileResponse("static/homepage.html")
+    return FileResponse(os.path.join(STATIC_DIR, "homepage.html"))
 
 
 @app.get("/dashboard")
 def serve_dashboard():
-    return FileResponse("static/dashboard.html")
+    return FileResponse(os.path.join(STATIC_DIR, "dashboard.html"))
 
 
 @app.get("/app")
 def serve_app_alias():
-    return FileResponse("static/dashboard.html")
+    return FileResponse(os.path.join(STATIC_DIR, "dashboard.html"))
 
 
 @app.get("/index.html")
 def serve_index_alias():
-    return FileResponse("static/homepage.html")
+    return FileResponse(os.path.join(STATIC_DIR, "homepage.html"))
