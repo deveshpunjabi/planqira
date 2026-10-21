@@ -1,3 +1,5 @@
+> Historical architecture notes: these describe intended behavior and include unverified claims. For current behavior and release limitations, use README.md and TEST-REPORT.md. In particular, PostgreSQL support and private tenant authorization are not implemented. The dashboard navigation and test harness have since changed.
+
 # Planqira — Complete Technical & Architectural Documentation
 **Platform:** Planqira • Autonomous Event Decision, Commitment & Operations Platform  
 **Target:** Google PromptWars Virtual [Challenge 5] Celebration & Event Planner  

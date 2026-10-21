@@ -1,281 +1,221 @@
+"""Browser regressions using a temporary database and an automatically managed server."""
 import os
-import re
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+
 import pytest
-from playwright.sync_api import sync_playwright
-
-BASE_URL = "http://127.0.0.1:8080"
-ARTIFACT_DIR = r"C:\Users\Lenovo\.gemini\antigravity\brain\6c81ff26-c10e-4a15-b572-337e6e6e8ce0"
+from playwright.sync_api import sync_playwright, expect
 
 
-@pytest.fixture(scope="session")
-def browser_context():
+@pytest.fixture(scope="module")
+def server(tmp_path_factory):
+    root = Path(__file__).resolve().parent
+    sandbox = tmp_path_factory.mktemp("browser-server")
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    env = dict(os.environ, PLANQIRA_DB_PATH=str(sandbox / "events.db"), GEMINI_API_KEY="", GOOGLE_API_KEY="", DATABASE_URL="")
+    with (sandbox / "server.log").open("w") as log:
+        process = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)], cwd=root, env=env, stdout=log, stderr=log)
+        base = f"http://127.0.0.1:{port}"
+        try:
+            for _ in range(100):
+                if process.poll() is not None:
+                    pytest.fail("Preview server exited; inspect temporary server.log")
+                try:
+                    with urllib.request.urlopen(base + "/api/health", timeout=1):
+                        break
+                except OSError:
+                    time.sleep(.1)
+            else:
+                pytest.fail("Preview server did not become ready")
+            yield base
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+
+@pytest.fixture(scope="module")
+def browser():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
-        yield context
-        browser.close()
+        options = {"headless": True}
+        if os.getenv("PLAYWRIGHT_EXECUTABLE_PATH"):
+            options["executable_path"] = os.environ["PLAYWRIGHT_EXECUTABLE_PATH"]
+        instance = p.chromium.launch(**options)
+        yield instance
+        instance.close()
 
 
-def test_homepage_render(browser_context):
-    """Verify Homepage render, typography, 10% contingency calculation, and CTA."""
-    page = browser_context.new_page()
-    page.goto(f"{BASE_URL}/")
-    page.wait_for_load_state("networkidle")
-
-    # Title & Branding
-    title = page.title()
-    assert "Planqira" in title
-
-    headline = page.locator("h1").first.inner_text()
-    assert "Under control" in headline or "Planqira" in headline or "Every decision" in headline
-
-    # Verify interactive calculator exists
-    calc_budget = page.locator("#calcBudget")
-    if calc_budget.count() > 0:
-        calc_budget.fill("2000000")
-        page.dispatch_event("#calcBudget", "input")
-        page.wait_for_timeout(300)
-
-        # Check contingency reserve display: 10% of 2,000,000 = 200,000
-        calc_reserve = page.locator("#calcReserve").inner_text()
-        assert "2,00,000" in calc_reserve or "200,000" in calc_reserve
-
-    # Verify Launch Dashboard CTA
-    cta = page.locator("a[href='/dashboard']").first
-    assert cta.is_visible()
-
-    # Save screenshot artifact
-    screenshot_path = os.path.join(ARTIFACT_DIR, "homepage_desktop.png")
-    page.screenshot(path=screenshot_path)
-    page.close()
+@pytest.fixture
+def page(browser):
+    context = browser.new_context(viewport={"width": 1440, "height": 1000})
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    yield page
+    context.close()
+    assert not errors, f"Uncaught browser errors: {errors}"
 
 
-def test_dashboard_workspaces_and_navigation(browser_context):
-    """Verify Dashboard persistent sidebar and switching between all 6 workspaces."""
-    page = browser_context.new_page()
-    page.goto(f"{BASE_URL}/dashboard")
-    page.wait_for_load_state("networkidle")
+def open_dashboard(page, server):
+    page.goto(server + "/dashboard")
+    expect(page.locator("#dashboardContent")).to_have_attribute("aria-busy", "false")
+    expect(page.locator("#headerEventTitle")).not_to_contain_text("Loading")
 
-    # Wait for initial event data load
-    page.wait_for_selector("#headerEventTitle", timeout=10000)
-    title_text = page.locator("#headerEventTitle").inner_text()
-    assert len(title_text) > 0 and title_text != "Loading Celebration..."
 
-    # Check financial strip solvency metrics
-    fin_budget = page.locator("#finBudget").inner_text()
-    assert "₹" in fin_budget
+def test_homepage_and_dashboard_routes(page, server):
+    page.goto(server)
+    expect(page).to_have_title(__import__('re').compile("Planqira"))
+    expect(page.locator("a[href='/dashboard']").first).to_be_visible()
+    open_dashboard(page, server)
+    expect(page.locator("#upcomingTasks .task-preview")).to_have_count(3)
+    expect(page.locator("#taskProgressCount")).to_contain_text("complete")
 
-    # Test navigating through all 6 workspace tabs
-    workspaces = [
-        ("navBtnOverview", "#tabOverview"),
-        ("navBtnIdeas", "#tabIdeas"),
-        ("navBtnBudget", "#tabBudget"),
-        ("navBtnTimeline", "#tabTimeline"),
-        ("navBtnEventDay", "#tabEventDay"),
-        ("navBtnScenario", "#tabScenario"),
-    ]
 
-    for btn_id, tab_id in workspaces:
-        btn = page.locator(f"#{btn_id}")
-        btn.click()
-        page.wait_for_timeout(200)
-        tab = page.locator(tab_id)
-        assert tab.is_visible(), f"Workspace {tab_id} should be visible after clicking #{btn_id}"
-
-    # Verify tabIdeas content
-    page.locator("#navBtnIdeas").click()
-    page.wait_for_timeout(300)
-    theme_cards = page.locator("#themesContainer .concept-panel")
-    assert theme_cards.count() >= 1, "Should render at least one curated theme concept panel"
-
-    # Verify tabBudget tables
+def test_navigation_and_context_survive_refresh(page, server):
+    open_dashboard(page, server)
+    for name in ["Ideas", "Budget", "Timeline", "EventDay", "Scenario", "Overview"]:
+        page.locator("#navBtn" + name).click()
+        expect(page.locator("#tab" + name)).to_be_visible()
+        expect(page.locator("#navBtn" + name)).to_have_attribute("aria-current", "page")
     page.locator("#navBtnBudget").click()
-    page.wait_for_timeout(300)
-    budget_rows = page.locator("#budgetTableBody tr")
-    assert budget_rows.count() >= 1, "Should render budget line items"
-
-    # Verify tabTimeline tasks
-    page.locator("#navBtnTimeline").click()
-    page.wait_for_timeout(300)
-    task_rows = page.locator("#tasksTableBody tr")
-    assert task_rows.count() >= 1, "Should render timeline preparation tasks"
-
-    # Verify tabEventDay runbook
-    page.locator("#navBtnEventDay").click()
-    page.wait_for_timeout(300)
-    runbook_rows = page.locator("#runbookTableBody tr")
-    assert runbook_rows.count() >= 1, "Should render runbook cues"
-
-    # Save screenshot of dashboard
-    screenshot_path = os.path.join(ARTIFACT_DIR, "dashboard_desktop.png")
-    page.screenshot(path=screenshot_path)
-    page.close()
+    page.locator("#refreshButton").click()
+    expect(page.locator("#refreshButton")).to_be_enabled()
+    expect(page.locator("#tabBudget")).to_be_visible()
+    page.reload()
+    expect(page.locator("#tabBudget")).to_be_visible()
+    page.locator("#sidebarToggle").click()
+    expect(page.locator("#sidebarToggle")).to_have_attribute("aria-expanded", "false")
+    page.reload()
+    expect(page.locator("#sidebarToggle")).to_have_attribute("aria-expanded", "false")
 
 
-def test_quote_extraction_modal(browser_context):
-    """Verify AI quote parser modal extracts items, parses percentages, and handles negations."""
-    page = browser_context.new_page()
-    page.goto(f"{BASE_URL}/dashboard")
-    page.wait_for_load_state("networkidle")
-    page.locator("#navBtnBudget").click()
-    page.wait_for_timeout(300)
-
-    # Open Quote Modal via exact button
-    page.locator("button:has-text('AI Quote Extractor')").first.click()
-    page.wait_for_selector("#quoteModal", state="visible")
-
-    # Fill sample quote text with advance percentage & waived fees
-    sample_quote = (
-        "Royal Sound & Stage Setup: Grand banquet stage ₹1,20,000, Acoustic line-array ₹60,000. "
-        "Diesel included. No corkage fee. 30% advance deposit due by 2026-11-05."
-    )
-    page.locator("#rawQuoteInput").fill(sample_quote)
-    page.locator("button:has-text('Extract Line Items')").click()
-
-    # Wait for parsed review section
-    page.wait_for_selector("#quoteReviewSection", state="visible", timeout=10000)
-
-    # Verify extracted vendor and deposit amount
-    vendor_display = page.locator("#revVendorName").inner_text()
-    assert "Sound" in vendor_display or "Royal" in vendor_display
-
-    deposit_display = page.locator("#revAdvance").inner_text()
-    assert "₹" in deposit_display
-    # 30% of ₹180,000 = ₹54,000
-    assert "54,000" in deposit_display
-
-    # Verify approve button is now visible
-    approve_btn = page.locator("#btnApproveQuote")
-    assert approve_btn.is_visible()
-
-    # Close modal
-    page.locator("#quoteModal button:has-text('Cancel')").click()
-    page.wait_for_selector("#quoteModal", state="hidden")
-    page.close()
+def test_loading_error_retry_and_empty_states(page, server):
+    page.route("**/api/events", lambda route: route.fulfill(status=503, content_type="application/json", body='{}'))
+    page.goto(server + "/dashboard")
+    expect(page.locator("#loadError")).to_be_visible()
+    page.unroute("**/api/events")
+    page.get_by_role("button", name="Try again", exact=True).click()
+    expect(page.locator("#loadError")).to_be_hidden()
+    expect(page.locator("#headerEventTitle")).to_be_visible()
+    page.route("**/api/events", lambda route: route.fulfill(content_type="application/json", body='{"events":[]}'))
+    page.reload()
+    expect(page.locator("#emptyState")).to_be_visible()
+    expect(page.locator("#workspaceMain")).to_be_hidden()
 
 
-def test_record_payment_modal(browser_context):
-    """Verify cash flow payment recording updates the payments table and financial strip."""
-    page = browser_context.new_page()
-    page.goto(f"{BASE_URL}/dashboard")
-    page.wait_for_load_state("networkidle")
-    page.locator("#navBtnBudget").click()
-    page.wait_for_timeout(300)
-
-    # Open Payment Modal
-    page.locator("button:has-text('Record Payment')").first.click()
-    page.wait_for_selector("#paymentModal", state="visible")
-
-    # Fill payment details
-    page.locator("#payAmountRs").fill("15000")
-    page.locator("#payMethod").select_option("UPI")
-    page.locator("#payReference").fill("PLAYWRIGHT-TEST-REF-001")
-
-    # Submit Payment
-    page.locator("button:has-text('Commit Payment to Ledger')").click()
-    page.wait_for_selector("#paymentModal", state="hidden", timeout=5000)
-
-    # Verify table has the new payment row
-    page.wait_for_timeout(500)
-    payments_table = page.locator("#paymentsTableBody").inner_text()
-    assert "PLAYWRIGHT-TEST-REF-001" in payments_table
-    assert "15,000" in payments_table
-
-    page.close()
+def test_skeleton_during_pending_request(page, server):
+    page.route("**/api/events", lambda route: route.abort())
+    page.goto(server + "/dashboard", wait_until="domcontentloaded")
+    expect(page.locator("#loadError")).to_be_visible()
+    # Hold a subsequent detail request until the test explicitly releases it.
+    page.unroute("**/api/events")
+    pending = []
+    page.route("**/api/events/*", lambda route: pending.append(route))
+    page.get_by_role("button", name="Try again", exact=True).click()
+    expect(page.locator("#loadingState")).to_be_visible()
+    expect(page.locator("#dashboardContent")).to_have_attribute("aria-busy", "true")
+    expect(page.locator("#refreshButton")).to_be_disabled()
+    page.wait_for_timeout(100)
+    assert pending
+    pending[0].continue_()
+    expect(page.locator("#loadingState")).to_be_hidden()
 
 
-def test_scenario_lab_simulation(browser_context):
-    """Verify Scenario Lab recalculation, DAG impact detection, and diff table."""
-    page = browser_context.new_page()
-    page.goto(f"{BASE_URL}/dashboard")
-    page.wait_for_load_state("networkidle")
-
-    # Navigate to Scenario Lab
-    page.locator("#navBtnScenario").click()
-    page.wait_for_timeout(300)
-
-    # Adjust guest headcount
-    slider = page.locator("#simHeadcountSlider")
-    slider.fill("320")
-    page.dispatch_event("#simHeadcountSlider", "input")
-    page.wait_for_timeout(200)
-
-    # Click Compute Impact
-    page.locator("button:has-text('Compute Impact')").click()
-
-    # Verify summary section and diff table appear
-    page.wait_for_selector("#simSummarySection", state="visible", timeout=10000)
-    page.wait_for_selector("#simDiffCard", state="visible", timeout=10000)
-
-    # Check diff table has entries
-    diff_rows = page.locator("#simDiffTableBody tr")
-    assert diff_rows.count() >= 1
-
-    # Check Commit button is visible
-    commit_btn = page.locator("button:has-text('Commit as Scenario vNext')")
-    assert commit_btn.is_visible()
-    page.close()
-
-
-def test_accessibility_keyboard_modal_dismissal(browser_context):
-    """Verify modal accessibility: pressing Escape closes active modal."""
-    page = browser_context.new_page()
-    page.goto(f"{BASE_URL}/dashboard")
-    page.wait_for_load_state("networkidle")
-
-    # Open Create Event modal via exact button
-    page.locator("button:has-text('+ Create Event')").first.click()
-    page.wait_for_selector("#createEventModal", state="visible")
-
-    # Press Escape key
+def test_quote_review_and_modal_focus(page, server):
+    open_dashboard(page, server)
+    page.locator("#workspaceAction").click()
+    modal = page.locator("#quoteModal")
+    expect(modal).to_have_attribute("role", "dialog")
+    page.locator("#rawQuoteInput").fill("Royal Sound & Stage Setup: Grand banquet stage ₹1,20,000, Acoustic line-array ₹60,000. Diesel included. No corkage fee. 30% advance deposit due by 2026-11-05.")
+    page.get_by_role("button", name="Read quote", exact=True).click()
+    expect(page.locator("#quoteReviewSection")).to_be_visible()
+    expect(page.locator("#revAdvance")).to_contain_text("54,000")
+    expect(page.locator("#aiParserStatus")).to_contain_text("Basic parser")
+    expect(page.locator("#revClausesList")).not_to_contain_text("corkage fee required")
+    page.locator("#btnApproveQuote").focus()
+    page.keyboard.press("Tab")
+    expect(modal.get_by_role("button", name="Close dialog")).to_be_focused()
     page.keyboard.press("Escape")
-    page.wait_for_selector("#createEventModal", state="hidden")
-
-    page.close()
-
-
-def test_file_exports_csv_and_ics(browser_context):
-    """Verify CSV and RFC-5545 ICS calendar exports return valid HTTP 200 data."""
-    page = browser_context.new_page()
-    page.goto(f"{BASE_URL}/dashboard")
-    page.wait_for_load_state("networkidle")
-
-    # Get active event ID from selector
-    event_id = page.locator("#eventSelector").input_value()
-    assert event_id, "Active event ID must be present"
-
-    # Verify CSV export
-    csv_response = page.request.get(f"{BASE_URL}/api/events/{event_id}/export.csv")
-    assert csv_response.status == 200
-    csv_text = csv_response.text()
-    assert "PLANQIRA EVENT FINANCIAL LEDGER" in csv_text
-    assert "Event Title" in csv_text
-
-    # Verify ICS export
-    ics_response = page.request.get(f"{BASE_URL}/api/events/{event_id}/export.ics")
-    assert ics_response.status == 200
-    ics_text = ics_response.text()
-    assert "BEGIN:VCALENDAR" in ics_text
-    assert "END:VCALENDAR" in ics_text
-    assert "BEGIN:VEVENT" in ics_text
-    assert "SUMMARY:" in ics_text
-
-    page.close()
+    expect(modal).to_be_hidden()
+    expect(page.locator("#workspaceAction")).to_be_focused()
 
 
-def test_light_editorial_theme_styling(browser_context):
-    """Verify strict light theme compliance (no dark backgrounds, warm ivory palette)."""
-    page = browser_context.new_page()
-    page.goto(f"{BASE_URL}/dashboard")
-    page.wait_for_load_state("networkidle")
+def test_payment_updates_cash_and_survives_refresh(page, server):
+    open_dashboard(page, server)
+    before = page.locator("#finPaid").inner_text()
+    page.locator("#navBtnBudget").click()
+    page.get_by_role("button", name="Record Payment", exact=True).click()
+    page.locator("#payAmountRs").fill("100")
+    page.locator("#payMethod").select_option("UPI")
+    page.locator("#payReference").fill("ISOLATED-UI-TEST")
+    page.get_by_role("button", name="Save payment", exact=True).click()
+    expect(page.locator("#paymentModal")).to_be_hidden()
+    expect(page.locator("#finPaid")).not_to_have_text(before)
+    after = page.locator("#finPaid").inner_text()
+    money = lambda text: float(text.replace('₹', '').replace(',', ''))
+    assert money(after) - money(before) == 100
+    page.reload()
+    expect(page.locator("#finPaid")).to_have_text(after)
+    expect(page.locator("#paymentsTableBody")).to_contain_text("ISOLATED-UI-TEST")
 
-    # Check body background color
-    bg_color = page.evaluate("() => window.getComputedStyle(document.body).backgroundColor")
-    # RGB for #f7f6f2 is rgb(247, 246, 242)
-    assert "247" in bg_color or "255" in bg_color
 
-    # Verify no dark class on body or html
-    body_class = page.locator("body").get_attribute("class") or ""
-    assert "dark" not in body_class
+def test_scenario_preview_does_not_change_saved_guests(page, server):
+    open_dashboard(page, server)
+    before = page.locator("#metaGuests").inner_text()
+    page.locator("#navBtnScenario").click()
+    page.locator("#simHeadcountSlider").fill("320")
+    page.locator("#simHeadcountSlider").dispatch_event("input")
+    page.get_by_role("button", name="Preview changes", exact=True).click()
+    expect(page.locator("#simSummarySection")).to_be_visible()
+    assert page.locator("#simDiffTableBody tr").count() > 0
+    expect(page.locator("#metaGuests")).to_have_text(before)
+    expect(page.get_by_role("button", name="Save this version", exact=True)).to_be_visible()
 
-    page.close()
+
+@pytest.mark.parametrize("width", [390, 768, 1440])
+def test_responsive_navigation_and_no_page_overflow(page, server, width):
+    page.set_viewport_size({"width": width, "height": 900})
+    open_dashboard(page, server)
+    if width < 761:
+        expect(page.locator("#sidebarToggle")).to_have_attribute("aria-expanded", "false")
+        page.locator("#sidebarToggle").click()
+        expect(page.locator("#sidebarBackdrop")).to_be_visible()
+    page.locator("#navBtnBudget").click()
+    expect(page.locator("#tabBudget")).to_be_visible()
+    if width < 761:
+        expect(page.locator("#sidebarBackdrop")).to_be_hidden()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Page overflows viewport"
+    assert page.locator("#budgetTableBody tr").count() > 0
+    for metric in page.locator('.fin-value:visible').all():
+        assert metric.evaluate('e => e.clientHeight >= e.scrollHeight'), 'Financial value is clipped'
+    if os.getenv("PLANQIRA_SCREENSHOT_DIR"):
+        if width < 761:
+            page.locator("#sidebarToggle").click()
+        page.locator("#navBtnOverview").click()
+        page.evaluate("window.scrollTo(0, 0)")
+        page.emulate_media(reduced_motion="reduce")
+        page.screenshot(path=str(Path(os.environ["PLANQIRA_SCREENSHOT_DIR"]) / f"planqira-dashboard-{width}.png"), full_page=False)
+
+
+def test_guide_reduced_motion_and_exports(page, server):
+    page.emulate_media(reduced_motion="reduce")
+    open_dashboard(page, server)
+    page.get_by_role("button", name="How to use Planqira", exact=True).click()
+    expect(page.get_by_role("dialog", name="From first idea to event day")).to_be_visible()
+    page.keyboard.press("Escape")
+    assert page.locator("#tabOverview").evaluate("e => getComputedStyle(e).animationName") == "none"
+    event = page.locator("#eventSelector").input_value()
+    csv = page.request.get(server + f"/api/events/{event}/export.csv")
+    assert csv.status == 200 and "Event Title" in csv.text()
+    ics = page.request.get(server + f"/api/events/{event}/export.ics")
+    assert ics.status == 200 and "BEGIN:VCALENDAR" in ics.text()
+    assert page.locator("body").evaluate("e => getComputedStyle(e).backgroundColor") == "rgb(247, 246, 242)"

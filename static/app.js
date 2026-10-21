@@ -49,27 +49,30 @@ function formatPaise(paise) {
 // 1. Health & Startup
 async function checkHealth() {
   try {
-    const res = await fetch("/api/health");
+    const res = await requestAPI("/api/health");
+    if (!res.ok) throw new Error("Assistant status unavailable");
     const data = await res.json();
     const pill = document.getElementById("connectionPill");
     pill.textContent = "";
     
     if (data.has_server_key) {
       pill.className = "status-badge badge-green";
-      pill.appendChild(document.createTextNode(`● ${data.model || 'Gemma 4'} Connected`));
+      pill.appendChild(document.createTextNode("Quote assistant: AI configured"));
     } else {
       pill.className = "status-badge badge-amber";
-      pill.appendChild(document.createTextNode(`● ${data.model || 'Gemma 4'} Heuristic (Offline)`));
+      pill.appendChild(document.createTextNode("Quote assistant: basic mode"));
     }
   } catch (e) {
-    console.error("Health check error:", e);
+    document.getElementById("connectionPill").textContent = "Quote assistant: status unavailable";
   }
 }
 
 // 2. Events Loading
 async function loadEvents() {
+  setWorkspaceLoading(true);
   try {
-    const res = await fetch("/api/events");
+    const res = await requestAPI("/api/events");
+    if (!res.ok) throw new Error("Events could not be loaded. Please try again.");
     const data = await res.json();
     const picker = document.getElementById("eventSelector");
     if (!picker) return;
@@ -92,10 +95,17 @@ async function loadEvents() {
       picker.value = requestedEvent;
     } else if (data.events.length > 0) {
       currentEventId = data.events[0].id;
+      picker.value = currentEventId;
     }
 
     if (currentEventId) {
       await loadEventDetails(currentEventId);
+    } else {
+      currentEventData = null;
+      document.body.classList.add("is-empty");
+      document.getElementById("emptyState").hidden = false;
+      setWorkspaceLoading(false);
+      document.getElementById("syncStatus").textContent = "Ready to create an event";
     }
 
     if (requestedTab) {
@@ -113,24 +123,40 @@ async function loadEvents() {
       }
     }
   } catch (e) {
-    console.error("Error loading events:", e);
+    showLoadError(e.message);
   }
 }
 
+let eventRequestSequence = 0;
 async function switchEvent(eventId) {
+  latestSimResult = null;
+  parsedQuoteData = null;
   currentEventId = eventId;
+  const url = new URL(location.href);
+  url.searchParams.set("event", eventId);
+  url.searchParams.delete("guests");
+  history.replaceState(null, "", url);
   await loadEventDetails(eventId);
 }
 
 async function loadEventDetails(eventId) {
+  const request = ++eventRequestSequence;
+  setWorkspaceLoading(true, Boolean(currentEventData));
   try {
-    const res = await fetch(`/api/events/${eventId}`);
-    if (!res.ok) throw new Error("Event not found");
+    const res = await requestAPI(`/api/events/${encodeURIComponent(eventId)}`);
+    if (!res.ok) throw new Error("This event could not be loaded. Refresh to try again.");
     const data = await res.json();
+    if (request !== eventRequestSequence) return;
     currentEventData = data;
+    currentEventId = eventId;
+    latestSimResult = null;
     renderAll(data);
+    renderOverview(data);
+    document.getElementById("syncStatus").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
   } catch (e) {
-    console.error("Error loading event details:", e);
+    if (request === eventRequestSequence) showLoadError(e.message);
+  } finally {
+    if (request === eventRequestSequence) setWorkspaceLoading(false);
   }
 }
 
@@ -161,40 +187,16 @@ function renderAll(data) {
   if (sol.solvency_status === "SOLVENT") {
     finVar.textContent = `+${formatPaise(sol.variance_paise)}`;
     finVar.style.color = "var(--status-green)";
-    finSolv.textContent = "SOLVENT (BALANCED)";
+    finSolv.textContent = "Within budget";
     finSolv.className = "status-badge badge-green";
     defBanner.style.display = "none";
   } else {
     finVar.textContent = `-${formatPaise(Math.abs(sol.variance_paise))}`;
     finVar.style.color = "var(--status-red)";
-    finSolv.textContent = "SOLVENCY DEFICIT";
+    finSolv.textContent = "Over budget";
     finSolv.className = "status-badge badge-red";
     defBanner.style.display = "block";
   }
-
-  // 01. Mission Overview Diagnostic
-  const ovrCallout = document.getElementById("overviewSolvencyCallout");
-  const ovrDetail = document.getElementById("overviewSolvencyDetail");
-  if (ovrCallout && ovrDetail) {
-    if (sol.solvency_status === "SOLVENT") {
-      ovrCallout.textContent = "Plan Balanced & Solvent";
-      ovrCallout.style.color = "var(--status-green)";
-      ovrDetail.textContent = `Target budget includes a dedicated 10% emergency buffer with ${formatPaise(sol.variance_paise)} unallocated surplus.`;
-    } else {
-      ovrCallout.textContent = "Solvency Deficit Detected";
-      ovrCallout.style.color = "var(--status-red)";
-      ovrDetail.textContent = `Total required spend exceeds target budget by ${formatPaise(Math.abs(sol.variance_paise))}. Headcount or scope reduction needed.`;
-    }
-  }
-
-  if (document.getElementById("overviewReserve")) document.getElementById("overviewReserve").textContent = formatPaise(sol.contingency_paise);
-  if (document.getElementById("overviewCommitted")) document.getElementById("overviewCommitted").textContent = formatPaise(sol.total_approved_commitments_paise || 0);
-  if (document.getElementById("overviewPaid")) document.getElementById("overviewPaid").textContent = formatPaise(sol.total_paid_paise);
-  if (document.getElementById("overviewOutstanding")) document.getElementById("overviewOutstanding").textContent = formatPaise(sol.total_outstanding_paise || 0);
-  if (document.getElementById("overviewCity")) document.getElementById("overviewCity").textContent = evt.city;
-  if (document.getElementById("overviewSetting")) document.getElementById("overviewSetting").textContent = evt.setting.toUpperCase();
-  if (document.getElementById("overviewDate")) document.getElementById("overviewDate").textContent = evt.event_date;
-  if (document.getElementById("overviewVersion")) document.getElementById("overviewVersion").textContent = `Scenario v${evt.active_scenario_version}`;
 
   // 02. Ideas Workspace
   renderIdeas(data.themes || []);
@@ -429,16 +431,20 @@ function initScenarioLab(evt) {
 }
 
 function onHeadcountSliderChange(val) {
+  invalidatePreview();
   document.getElementById("simHeadcountVal").textContent = val;
 }
 
 async function runScenarioSimulation() {
+  const eventId = currentEventId;
+  const baseVersion = currentEventData.event.active_scenario_version;
+  const previewSequence = ++simulationSequence;
   const guests = parseInt(document.getElementById("simHeadcountSlider").value, 10);
   const setting = document.getElementById("simSettingSelect").value;
   const date = document.getElementById("simDateInput").value;
 
   try {
-    const res = await fetch(`/api/events/${currentEventId}/simulate`, {
+    const res = await requestAPI(`/api/events/${currentEventId}/simulate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -449,7 +455,8 @@ async function runScenarioSimulation() {
       })
     });
     const sim = await res.json();
-    latestSimResult = sim;
+    if (eventId !== currentEventId || previewSequence !== simulationSequence) return;
+    latestSimResult = {...sim, previewBaseVersion: baseVersion};
 
     document.getElementById("simSummarySection").style.display = "flex";
     document.getElementById("simDiffCard").style.display = "block";
@@ -518,7 +525,7 @@ async function commitScenarioAction() {
   const guests = latestSimResult.new_guests;
   const setting = latestSimResult.new_setting;
   const date = latestSimResult.new_date;
-  const baseVersion = currentEventData.event.active_scenario_version;
+  const baseVersion = latestSimResult.previewBaseVersion;
   const invalidatedTaskIds = (latestSimResult.dag_impacts || []).map(i => i.id);
 
   const payload = {
@@ -545,55 +552,63 @@ async function commitScenarioAction() {
   };
 
   try {
-    const res = await fetch(`/api/events/${currentEventId}/commit-scenario`, {
+    const res = await requestAPI(`/api/events/${currentEventId}/commit-scenario`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
     if (res.status === 409) {
-      alert("Proposal rejected: event has been updated to a newer version by another edit. Please re-run simulation.");
+      showNotice("Proposal rejected: event has been updated to a newer version by another edit. Please re-run simulation.");
       await loadEventDetails(currentEventId);
       return;
     }
     const result = await res.json();
     if (result.success) {
-      alert(`Committed Scenario v${result.new_version}! Affected tasks flagged for review.`);
+      showNotice(`Committed Scenario v${result.new_version}! Affected tasks flagged for review.`);
       await loadEventDetails(currentEventId);
       switchTab("tabBudget");
     }
   } catch (e) {
     console.error("Error committing scenario:", e);
-    alert("Failed to commit scenario.");
+    showNotice("Failed to commit scenario.");
   }
 }
 
 // 5. Tab Switching (6 Workspaces with Persistent Sidebar)
+const workspaceInfo = {
+  tabOverview: ["Overview", "A clear view of your celebration.", "Your budget, next steps, and recent decisions in one place.", "Review a vendor quote", () => openQuoteModal()],
+  tabIdeas: ["Ideas & inspiration", "Give your celebration a direction.", "Explore themes and practical details that make the day your own.", "View the checklist", () => switchTab('tabTimeline')],
+  tabBudget: ["Budget & vendors", "Know where your budget goes.", "Review estimated costs, agreed quotes, and payments separately.", "Review a vendor quote", () => openQuoteModal()],
+  tabTimeline: ["Planning checklist", "One step closer to the day.", "Work through the preparation tasks. Recheck anything affected by a plan change.", "View event day", () => switchTab('tabEventDay')],
+  tabEventDay: ["Event-day schedule", "Keep the day running smoothly.", "Follow the schedule, use a backup plan, and record any issues.", "Report an issue", () => openIncidentModal()],
+  tabScenario: ["Explore changes", "What if your plans change?", "Preview costs and affected tasks. Your saved plan stays unchanged until you commit.", "How it works", () => showDemoGuide()]
+};
 function switchTab(tabId) {
-  document.querySelectorAll(".workspace-pane").forEach(p => p.classList.remove("active"));
-  document.querySelectorAll(".sidebar-btn").forEach(b => b.classList.remove("active"));
-  document.querySelectorAll(".tab-button").forEach(b => b.classList.remove("active"));
-
-  const targetPane = document.getElementById(tabId);
-  if (targetPane) targetPane.classList.add("active");
-
-  const btnMap = {
-    tabOverview: "navBtnOverview",
-    tabIdeas: "navBtnIdeas",
-    tabBudget: "navBtnBudget",
-    tabTimeline: "navBtnTimeline",
-    tabEventDay: "navBtnEventDay",
-    tabScenario: "navBtnScenario",
-  };
-  const activeBtnId = btnMap[tabId];
-  if (activeBtnId && document.getElementById(activeBtnId)) {
-    document.getElementById(activeBtnId).classList.add("active");
-  }
+  if (!workspaceInfo[tabId]) tabId = 'tabOverview';
+  const info = workspaceInfo[tabId];
+  document.querySelectorAll('.workspace-pane').forEach(p => p.classList.toggle('active', p.id === tabId));
+  const ids = ['navBtnOverview', 'navBtnIdeas', 'navBtnBudget', 'navBtnTimeline', 'navBtnEventDay', 'navBtnScenario'];
+  Object.keys(workspaceInfo).forEach((key, i) => {
+    const button = document.getElementById(ids[i]);
+    button.classList.toggle('active', key === tabId);
+    if (key === tabId) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+  document.body.dataset.workspace = tabId;
+  document.getElementById('pageTitle').textContent = info[0];
+  document.getElementById('workspaceTitle').textContent = info[1];
+  document.getElementById('workspaceDescription').textContent = info[2];
+  const action = document.getElementById('workspaceAction');
+  action.textContent = info[3]; action.onclick = info[4];
+  const url = new URL(location.href); url.searchParams.set('tab', tabId);
+  history.replaceState(null, '', url);
+  if (matchMedia('(max-width: 760px)').matches) toggleSidebar(false);
 }
 
 // 6. Task & Runbook Status Actions
 async function toggleTaskStatus(taskId, newStatus) {
   try {
-    const res = await fetch(`/api/events/${currentEventId}/tasks/${taskId}`, {
+    const res = await requestAPI(`/api/events/${currentEventId}/tasks/${taskId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: newStatus })
@@ -606,7 +621,7 @@ async function toggleTaskStatus(taskId, newStatus) {
 
 async function toggleRunbookStatus(cueId, newStatus) {
   try {
-    const res = await fetch(`/api/events/${currentEventId}/runbook/${cueId}`, {
+    const res = await requestAPI(`/api/events/${currentEventId}/runbook/${cueId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: newStatus })
@@ -621,6 +636,7 @@ async function toggleRunbookStatus(cueId, newStatus) {
 let lastFocusedElement = null;
 
 function openModal(id) {
+  if (matchMedia('(max-width: 760px)').matches) toggleSidebar(false);
   lastFocusedElement = document.activeElement;
   const modal = document.getElementById(id);
   if (modal) {
@@ -673,7 +689,7 @@ async function submitCreateEvent() {
   const budgetRs = parseFloat(document.getElementById("newEvtBudget").value);
 
   if (!title || !city || !event_date || isNaN(guest_count) || isNaN(budgetRs)) {
-    alert("Please fill in all mandatory event fields.");
+    showNotice("Please fill in all mandatory event fields.");
     return;
   }
 
@@ -702,7 +718,7 @@ async function submitCreateEvent() {
   };
 
   try {
-    const res = await fetch("/api/events", {
+    const res = await requestAPI("/api/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -713,11 +729,11 @@ async function submitCreateEvent() {
       await loadEvents();
       switchEvent(data.event_id);
     } else {
-      alert("Error: " + (data.detail || "Failed to create event."));
+      showNotice("Error: " + (data.detail || "Failed to create event."));
     }
   } catch (e) {
     console.error("Create event error:", e);
-    alert("Failed to create event.");
+    showNotice("Failed to create event.");
   }
 }
 
@@ -733,20 +749,20 @@ function loadSampleQuote(idx) {
 async function parseQuoteAction() {
   const text = document.getElementById("rawQuoteInput").value.trim();
   if (!text) {
-    alert("Please enter or paste vendor message text.");
+    showNotice("Please enter or paste vendor message text.");
     return;
   }
   const ind = document.getElementById("aiParserStatus");
   ind.textContent = "Extracting line items...";
 
   try {
-    const res = await fetch(`/api/events/${currentEventId}/parse-quote`, {
+    const res = await requestAPI(`/api/events/${currentEventId}/parse-quote`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ raw_quote_text: text })
     });
     const parsed = await res.json();
-    ind.textContent = parsed.is_simulated ? "Simulated Mode (No API Key)" : `Gemma 4 Output (${parsed.model_used || 'gemma-4'})`;
+    ind.textContent = parsed.is_simulated ? "Basic parser · check every term before approval" : `AI-assisted · ${parsed.model_used || 'configured model'} · review before approval`;
     parsedQuoteData = parsed.data;
 
     document.getElementById("quoteReviewSection").style.display = "block";
@@ -801,20 +817,20 @@ async function approveQuoteAction() {
       idempotency_key: `idem-${Date.now()}`
     };
 
-    const res = await fetch(`/api/events/${currentEventId}/approve-quote`, {
+    const res = await requestAPI(`/api/events/${currentEventId}/approve-quote`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
     const result = await res.json();
     if (result.success) {
-      alert(result.message);
+      showNotice(result.message);
       closeModal("quoteModal");
       await loadEventDetails(currentEventId);
     }
   } catch (e) {
     console.error("Approval error:", e);
-    alert("Failed to approve quote.");
+    showNotice("Failed to approve quote.");
   }
 }
 
@@ -828,12 +844,12 @@ async function submitRecordPayment() {
   const note = document.getElementById("payReference").value.trim();
 
   if (isNaN(amtRs) || amtRs <= 0 || !note) {
-    alert("Please enter a valid positive payment amount and reference note.");
+    showNotice("Please enter a valid positive payment amount and reference note.");
     return;
   }
 
   try {
-    const res = await fetch(`/api/events/${currentEventId}/record-payment`, {
+    const res = await requestAPI(`/api/events/${currentEventId}/record-payment`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -844,13 +860,13 @@ async function submitRecordPayment() {
     });
     const data = await res.json();
     if (data.success) {
-      alert(`Recorded actual cash payment of ₹${amtRs.toLocaleString('en-IN')}`);
+      showNotice(`Recorded actual cash payment of ₹${amtRs.toLocaleString('en-IN')}`);
       closeModal("paymentModal");
       await loadEventDetails(currentEventId);
     }
   } catch (e) {
     console.error("Payment error:", e);
-    alert("Failed to record payment.");
+    showNotice("Failed to record payment.");
   }
 }
 
@@ -865,12 +881,12 @@ async function submitIncident() {
   const resolution = document.getElementById("incResolution").value.trim();
 
   if (!title || !desc) {
-    alert("Please provide incident title and operational description.");
+    showNotice("Please provide incident title and operational description.");
     return;
   }
 
   try {
-    const res = await fetch(`/api/events/${currentEventId}/incidents`, {
+    const res = await requestAPI(`/api/events/${currentEventId}/incidents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -887,7 +903,7 @@ async function submitIncident() {
     }
   } catch (e) {
     console.error("Incident error:", e);
-    alert("Failed to log incident.");
+    showNotice("Failed to log incident.");
   }
 }
 
@@ -905,7 +921,7 @@ function openRevertModal() {
   });
 
   if (picker.options.length === 0) {
-    alert("No previous scenario versions available to revert to.");
+    showNotice("No previous scenario versions available to revert to.");
     return;
   }
   openModal("revertModal");
@@ -916,25 +932,25 @@ async function submitRevert() {
   const reason = document.getElementById("revertReasonInput").value.trim();
 
   if (!reason) {
-    alert("Please state a concrete reason for reverting.");
+    showNotice("Please state a concrete reason for reverting.");
     return;
   }
 
   try {
-    const res = await fetch(`/api/events/${currentEventId}/revert-scenario`, {
+    const res = await requestAPI(`/api/events/${currentEventId}/revert-scenario`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ target_version: version, reason })
     });
     const data = await res.json();
     if (data.success) {
-      alert(`Created Scenario v${data.new_version} restoring state from v${version}. Payments and historical logs preserved.`);
+      showNotice(`Created Scenario v${data.new_version} restoring state from v${version}. Payments and historical logs preserved.`);
       closeModal("revertModal");
       await loadEventDetails(currentEventId);
     }
   } catch (e) {
     console.error("Revert error:", e);
-    alert("Failed to revert scenario.");
+    showNotice("Failed to revert scenario.");
   }
 }
 
@@ -947,7 +963,132 @@ function exportFile(format) {
 // Startup
 window.addEventListener("DOMContentLoaded", async () => {
   if (document.getElementById("eventSelector")) {
-    await checkHealth();
-    await loadEvents();
+    initializeWorkspace();
+    await Promise.allSettled([checkHealth(), loadEvents()]);
   }
 });
+
+
+function setWorkspaceLoading(loading, refreshing = false) {
+  document.body.classList.toggle('is-loading', loading && !refreshing);
+  document.body.classList.toggle('is-refreshing', loading && refreshing);
+  document.getElementById('loadingState').hidden = !(loading && !refreshing);
+  document.getElementById('dashboardContent').setAttribute('aria-busy', String(loading));
+  // Prevent stale event actions while its data is changing.
+  document.getElementById('workspaceMain').inert = loading;
+  document.getElementById('refreshButton').disabled = loading;
+  if (loading) {
+    document.body.classList.remove('has-load-error', 'is-empty');
+    document.getElementById('loadError').hidden = true;
+    document.getElementById('emptyState').hidden = true;
+    document.getElementById('syncStatus').textContent = refreshing ? 'Refreshing…' : 'Loading your plan…';
+  }
+}
+function showLoadError(message) {
+  setWorkspaceLoading(false);
+  document.body.classList.add('has-load-error');
+  document.getElementById('loadErrorText').textContent = message;
+  document.getElementById('loadError').hidden = false;
+  document.getElementById('syncStatus').textContent = 'Could not update';
+}
+async function refreshPlan() {
+  if (currentEventId) await loadEventDetails(currentEventId);
+  else await loadEvents();
+  checkHealth();
+}
+function toggleSidebar(force) {
+  const open = typeof force === 'boolean' ? force : document.body.classList.contains('sidebar-closed');
+  document.body.classList.toggle('sidebar-closed', !open);
+  const sidebar = document.getElementById('plannerSidebar');
+  sidebar.inert = !open;
+  sidebar.setAttribute('aria-hidden', String(!open));
+  const button = document.getElementById('sidebarToggle');
+  button.setAttribute('aria-expanded', String(open));
+  button.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+  const mobile = matchMedia('(max-width: 760px)').matches;
+  document.getElementById('sidebarBackdrop').hidden = !(open && mobile);
+  document.getElementById('dashboardContent').inert = open && mobile;
+  if (!open && sidebar.contains(document.activeElement)) button.focus();
+  try { localStorage.setItem('planqira-navigation', open ? 'open' : 'closed'); } catch (_) {}
+}
+function showNotice(message) {
+  document.getElementById('toastText').textContent = message;
+  document.getElementById('toast').hidden = false;
+}
+function showDemoGuide() { openModal('guideModal'); }
+function renderOverview(data) {
+  const tasks = data.tasks || [];
+  const done = tasks.filter(t => t.status === 'DONE').length;
+  const pending = tasks.filter(t => t.status !== 'DONE').sort((a,b) => String(a.due_date || '').localeCompare(String(b.due_date || '')));
+  const needsReview = tasks.filter(t => t.status === 'NEEDS_REVIEW').length;
+  document.getElementById('taskProgress').max = Math.max(1, tasks.length);
+  document.getElementById('taskProgress').value = done;
+  document.getElementById('taskProgressCount').textContent = `${done} of ${tasks.length} complete`;
+  const deficit = data.solvency.variance_paise < 0;
+  document.getElementById('nextStepTitle').textContent = deficit ? 'Bring your plan within budget.' : needsReview ? 'A few details need another look.' : 'Turn your plan into a great day.';
+  document.getElementById('nextStepDescription').textContent = deficit ? `Your plan is ${formatPaise(Math.abs(data.solvency.variance_paise))} over budget, including the emergency reserve. Review the largest costs or preview a change.` : needsReview ? `${needsReview} tasks need review after a change. Check these before confirming the next step.` : 'Check the next preparation tasks, then confirm the details with your vendors.';
+  const next = document.getElementById('nextStepButton');
+  next.textContent = deficit ? 'Review budget →' : 'Open checklist →';
+  next.onclick = () => switchTab(deficit ? 'tabBudget' : 'tabTimeline');
+  const list = document.getElementById('upcomingTasks'); list.replaceChildren();
+  pending.slice(0,3).forEach(task => list.appendChild(el('div', {className:'task-preview'}, [el('span', {className:'task-dot', 'aria-hidden':'true'}), el('div', {}, [el('strong', {}, task.title || task.name || task.description || 'Planning task'), el('small', {}, `${task.due_date || 'No date set'} · ${task.status === 'NEEDS_REVIEW' ? 'Needs review' : 'To do'}`)])])));
+  if (!pending.length) list.appendChild(el('p', {}, 'All preparation tasks are complete. Your event-day schedule is ready to review.'));
+}
+let simulationSequence = 0;
+function invalidatePreview() {
+  simulationSequence++;
+  latestSimResult = null;
+  ['simSummarySection', 'simDiffCard', 'simDagCallout'].forEach(id => document.getElementById(id).style.display = 'none');
+}
+function initializeWorkspace() {
+  ['simSettingSelect', 'simDateInput'].forEach(id => document.getElementById(id).addEventListener('input', invalidatePreview));
+  document.querySelectorAll('.table-clean').forEach(table => {
+    if (table.parentElement.classList.contains('table-scroll')) return;
+    const wrap = el('div', {className:'table-scroll', tabindex:'0', role:'region', 'aria-label':'Scrollable table'});
+    table.before(wrap); wrap.appendChild(table);
+  });
+  document.querySelectorAll('.modal-overlay').forEach(modal => {
+    const heading = modal.querySelector('h3');
+    if (heading) { heading.id = `${modal.id}Title`; modal.setAttribute('aria-labelledby', heading.id); }
+    modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true');
+    modal.querySelectorAll('button').forEach(b => { if (['✕','×'].includes(b.textContent.trim())) b.setAttribute('aria-label','Close dialog'); });
+  });
+  document.querySelectorAll('.form-label').forEach(label => {
+    const control = label.parentElement.querySelector('input, select, textarea');
+    if (control?.id) label.setAttribute('for', control.id);
+  });
+  let expanded = !matchMedia('(max-width: 760px)').matches;
+  try { if (localStorage.getItem('planqira-navigation') === 'closed') expanded = false; } catch (_) {}
+  toggleSidebar(expanded);
+  switchTab(new URLSearchParams(location.search).get('tab') || 'tabOverview');
+  matchMedia('(max-width: 760px)').addEventListener('change', e => toggleSidebar(!e.matches));
+}
+// Keep keyboard focus inside the active modal; Escape returns it to its trigger.
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !document.querySelector('.modal-overlay.open')) toggleSidebar(false);
+  if (event.key !== 'Tab') return;
+  const modal = document.querySelector('.modal-overlay.open');
+  if (!modal) return;
+  const targets = [...modal.querySelectorAll('button, a[href], input, select, textarea, [tabindex="0"]')].filter(e => !e.disabled && e.getClientRects().length);
+  const first = targets[0], last = targets[targets.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+});
+
+
+async function requestAPI(url, options = {}) {
+  const mutation = options.method && options.method !== 'GET';
+  const trigger = mutation && document.activeElement instanceof HTMLButtonElement ? document.activeElement : null;
+  const originalLabel = trigger?.textContent;
+  if (trigger) { trigger.disabled = true; trigger.textContent = 'Working…'; trigger.setAttribute('aria-busy', 'true'); }
+  try {
+    const response = await fetch(url, {...options, signal: options.signal || AbortSignal.timeout(45000)});
+    if (mutation && !response.ok) {
+      const error = await response.clone().json().catch(() => ({}));
+      throw new Error(typeof error.detail === 'string' ? error.detail : `Could not save this change (${response.status}). Please review the details and try again.`);
+    }
+    return response;
+  } finally {
+    if (trigger) { trigger.disabled = false; trigger.textContent = originalLabel; trigger.removeAttribute('aria-busy'); }
+  }
+}

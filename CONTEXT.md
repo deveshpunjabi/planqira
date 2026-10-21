@@ -1,3 +1,5 @@
+> Historical architecture notes: these describe intended behavior and include unverified claims. For current behavior and release limitations, use README.md and TEST-REPORT.md. In particular, PostgreSQL support and private tenant authorization are not implemented. The dashboard navigation and test harness have since changed.
+
 # Planqira — Project Context & Engineering Architecture
 
 ## 1. Product Scope & Mission

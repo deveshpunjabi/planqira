@@ -580,7 +580,8 @@ def test_public_homepage_and_dashboard_routes(client):
     assert res_dash.status_code == 200
     assert "Planqira" in res_dash.text
     assert "app.js" in res_dash.text
-    assert "Scenario Lab" in res_dash.text
+    assert 'id="navBtnScenario"' in res_dash.text
+    assert "Explore changes" in res_dash.text
     assert "dashboard-sidebar" in res_dash.text
     assert "tabOverview" in res_dash.text
     assert "tabEventDay" in res_dash.text
