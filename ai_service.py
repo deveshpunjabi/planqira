@@ -11,6 +11,12 @@ import re
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Check if google-genai SDK is available
 try:
     from google import genai
