@@ -4,8 +4,8 @@ ACID-compliant relational storage with schema migrations,
 foreign keys, payment ledgers, incident logging, and audit trail.
 """
 
-from datetime import datetime, timedelta, timezone
-import hashlib
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import json
 import os
 import sqlite3
@@ -13,7 +13,7 @@ import time
 from typing import Any, Dict, List, Optional
 import uuid
 
-from engine import compute_line_item_paise
+from engine import compute_line_item_paise, build_task_dag
 
 DB_FILE = "planqira.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -32,9 +32,18 @@ def get_db_path() -> str:
     return DB_FILE
 
 
+class ClosingConnection(sqlite3.Connection):
+    """Commit or roll back the transaction, then release the file handle."""
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
+
 def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     target_path = db_path or get_db_path()
-    conn = sqlite3.connect(target_path)
+    conn = sqlite3.connect(target_path, factory=ClosingConnection, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
@@ -218,9 +227,12 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         ("vendor_commitments", "deposit_required_paise", "INTEGER NOT NULL DEFAULT 0"),
         ("vendor_commitments", "needs_reconfirmation", "INTEGER NOT NULL DEFAULT 0"),
         ("vendor_commitments", "idempotency_key", "TEXT"),
+        ("vendor_commitments", "request_fingerprint", "TEXT"),
         ("tasks", "reverification_reason", "TEXT"),
         ("scenarios", "event_date", "TEXT"),
         ("payments", "idempotency_key", "TEXT"),
+        ("budget_items", "is_tax_inclusive", "INTEGER NOT NULL DEFAULT 0"),
+        ("budget_items", "obligation_id", "TEXT"),
     ]
     for table, col, col_def in migrations:
         try:
@@ -543,12 +555,9 @@ def create_event(event_data: Dict[str, Any], db_path: Optional[str] = None) -> D
         """, items)
 
         # Generate date-aware preparation tasks with lead time compression
-        try:
-            evt_dt = datetime.strptime(event_date, "%Y-%m-%d")
-            today_dt = datetime.now(timezone.utc).replace(tzinfo=None)
-            days_until = (evt_dt - today_dt).days
-        except Exception:
-            days_until = 30
+        evt_dt = datetime.strptime(event_date, "%Y-%m-%d")
+        today = datetime.now(ZoneInfo(timezone)).date()
+        days_until = (evt_dt.date() - today).days
 
         if days_until > 30:
             tasks = [
@@ -564,6 +573,9 @@ def create_event(event_data: Dict[str, Any], db_path: Optional[str] = None) -> D
                 (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-3 Days (Rapid)", f"Lock Headcount & {tasting_task_title}", "Host", "CRITICAL", "PENDING", 1, (evt_dt - timedelta(days=max(1, min(3, days_until)))).strftime("%Y-%m-%d"), None),
                 (f"task-{uuid.uuid4().hex[:10]}", event_id, "T-1 Day", "Confirm Vendor Arrival Windows & Power Setup", "Coordinator", "HIGH", "PENDING", 0, (evt_dt - timedelta(days=1)).strftime("%Y-%m-%d"), None),
             ]
+        # Short-notice preparation cannot be scheduled before today.
+        tasks = [tuple(max(row[8], today.isoformat()) if i == 8 else value
+                       for i, value in enumerate(row)) for row in tasks]
         conn.executemany("""
             INSERT INTO tasks (id, event_id, timeframe, title, owner, priority, status, depends_on_guests, due_date, reverification_reason)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -575,15 +587,16 @@ def create_event(event_data: Dict[str, Any], db_path: Optional[str] = None) -> D
         except Exception:
             start_hour, start_min = 15, 0
 
-        t1_start = f"{start_hour:02d}:{start_min:02d}"
-        t1_end_h = (start_hour + int(duration_hours * 0.3)) % 24
-        t1_end = f"{t1_end_h:02d}:{start_min:02d}"
+        duration_minutes = round(duration_hours * 60)
+        def cue_time(offset):
+            day, minute = divmod(start_hour * 60 + start_min + offset, 1440)
+            hour, minute = divmod(minute, 60)
+            return f"{hour:02d}:{minute:02d}" + (f" (+{day}d)" if day else "")
 
-        t2_end_h = (start_hour + int(duration_hours * 0.7)) % 24
-        t2_end = f"{t2_end_h:02d}:{start_min:02d}"
-
-        t3_end_h = (start_hour + int(duration_hours)) % 24
-        t3_end = f"{t3_end_h:02d}:{start_min:02d}"
+        t1_start = cue_time(0)
+        t1_end = cue_time(round(duration_minutes * 0.3))
+        t2_end = cue_time(round(duration_minutes * 0.7))
+        t3_end = cue_time(duration_minutes)
 
         runbook = [
             (f"rb-{uuid.uuid4().hex[:10]}", event_id, f"{t1_start} - {t1_end}", "Guest Arrival & Welcome Hospitality", "Crew positions active, audio check confirmed", "Host & Hospitality Lead", "PENDING"),
@@ -644,7 +657,8 @@ def get_event_by_id(event_id: str, db_path: Optional[str] = None) -> Optional[Di
         t_rows = conn.execute("SELECT * FROM tasks WHERE event_id = ? ORDER BY due_date ASC;", (event_id,)).fetchall()
         tasks = [dict(r) for r in t_rows]
 
-        dep_rows = conn.execute("SELECT * FROM task_dependencies;").fetchall()
+        dep_rows = conn.execute("""SELECT d.* FROM task_dependencies d
+                                JOIN tasks t ON t.id = d.parent_task_id WHERE t.event_id = ?;""", (event_id,)).fetchall()
         dependencies = [(r["parent_task_id"], r["child_task_id"]) for r in dep_rows]
 
         rb_rows = conn.execute("SELECT * FROM runbook_cues WHERE event_id = ?;", (event_id,)).fetchall()
@@ -657,7 +671,9 @@ def get_event_by_id(event_id: str, db_path: Optional[str] = None) -> Optional[Di
             d["palette_hex"] = json.loads(d["palette_hex"]) if isinstance(d["palette_hex"], str) else d["palette_hex"]
             themes.append(d)
 
-        pay_rows = conn.execute("SELECT * FROM payments WHERE event_id = ? ORDER BY paid_at DESC;", (event_id,)).fetchall()
+        pay_rows = conn.execute("""SELECT p.*, COALESCE(b.obligation_id, p.budget_item_id) AS obligation_id
+                                FROM payments p LEFT JOIN budget_items b ON b.id = p.budget_item_id
+                                WHERE p.event_id = ? ORDER BY p.paid_at DESC;""", (event_id,)).fetchall()
         payments = [dict(r) for r in pay_rows]
 
         inc_rows = conn.execute("SELECT * FROM incidents WHERE event_id = ? ORDER BY created_at DESC;", (event_id,)).fetchall()
@@ -764,6 +780,8 @@ def commit_scenario_version(
                 it.get("superseded_by_id"),
                 it.get("notes"),
             ))
+            conn.execute("UPDATE budget_items SET is_tax_inclusive = ?, obligation_id = ? WHERE id = ?;",
+                         (int(it.get("is_tax_inclusive", 0)), it.get("obligation_id") or it["id"], item_id))
 
         # Authoritatively evaluate shifted parameters and DAG task invalidations
         changed_params = []
@@ -776,24 +794,15 @@ def commit_scenario_version(
 
         all_task_ids_to_invalidate = set()
         if changed_params:
-            try:
-                from engine import DependencyDAG
-                task_rows = conn.execute("SELECT * FROM tasks WHERE event_id = ?;", (event_id,)).fetchall()
-                dep_rows = conn.execute("""
-                    SELECT td.parent_task_id, td.child_task_id 
-                    FROM task_dependencies td
-                    JOIN tasks t ON td.parent_task_id = t.id
-                    WHERE t.event_id = ?;
-                """, (event_id,)).fetchall()
-
-                dag = DependencyDAG(
-                    tasks=[dict(t) for t in task_rows],
-                    dependencies=[dict(d) for d in dep_rows],
-                )
-                server_impacts = dag.propagate_invalidation(changed_params)
-                all_task_ids_to_invalidate.update(imp["id"] for imp in server_impacts if imp["type"] == "TASK")
-            except Exception:
-                pass
+            task_rows = conn.execute("SELECT * FROM tasks WHERE event_id = ?;", (event_id,)).fetchall()
+            dep_rows = conn.execute("""
+                SELECT td.parent_task_id, td.child_task_id FROM task_dependencies td
+                JOIN tasks t ON td.parent_task_id = t.id WHERE t.event_id = ?;
+            """, (event_id,)).fetchall()
+            dag = build_task_dag([dict(t) for t in task_rows],
+                                 [(d["parent_task_id"], d["child_task_id"]) for d in dep_rows])
+            server_impacts = dag.propagate_invalidation(changed_params)
+            all_task_ids_to_invalidate.update(imp["id"] for imp in server_impacts if imp["type"] == "TASK")
 
         # Union with valid client-supplied task IDs strictly belonging to this event
         if invalidated_task_ids:
@@ -901,6 +910,8 @@ def revert_scenario_version(
                 it["deposit_due_date"],
                 it["notes"],
             ))
+            conn.execute("UPDATE budget_items SET is_tax_inclusive = ?, obligation_id = ? WHERE id = ?;",
+                         (it["is_tax_inclusive"], it["obligation_id"] or it["id"], item_id))
 
         conn.execute("""
             UPDATE events SET guest_count = ?, setting = ?, event_date = ?, active_scenario_version = ? WHERE id = ?;
@@ -937,6 +948,7 @@ def record_payment(
 
     with get_connection(target_path) as conn:
         # Cross-event tenant validation
+        conn.execute("BEGIN IMMEDIATE;")
         evt = conn.execute("SELECT id FROM events WHERE id = ?;", (event_id,)).fetchone()
         if not evt:
             raise ValueError(f"Event {event_id} not found")
@@ -952,7 +964,8 @@ def record_payment(
                 same_method = existing["payment_method"] == payment_method
                 same_budget = (existing["budget_item_id"] or "") == (budget_item_id or "")
                 same_comm = (existing["commitment_id"] or "") == (commitment_id or "")
-                if same_amount and same_method and same_budget and same_comm:
+                same_reference = existing["reference_note"] == clean_ref
+                if same_amount and same_method and same_budget and same_comm and same_reference:
                     return {
                         "success": True,
                         "payment_id": existing["id"],
@@ -986,46 +999,7 @@ def record_payment(
         conn.execute("""
             INSERT INTO payments (id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, idempotency_key, paid_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """, (payment_id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, key, now_str))
-
-        if commitment_id:
-            conn.execute("""
-                UPDATE vendor_commitments SET paid_amount_paise = paid_amount_paise + ? WHERE id = ? AND event_id = ?;
-            """, (amount_paise, commitment_id, event_id))
-
-        if budget_item_id:
-            conn.execute("""
-                UPDATE budget_items SET paid_amount_paise = paid_amount_paise + ? WHERE id = ?;
-            """, (amount_paise, budget_item_id))
-
-        conn.execute("""
-            INSERT INTO audit_logs (event_id, timestamp, action_type, description, previous_value, new_value)
-            VALUES (?, ?, ?, ?, ?, ?);
-        """, (event_id, now_str, "RECORD_PAYMENT", f"Recorded payment of ₹{amount_paise/100:,.2f} via {payment_method} ({reference_note})", None, f"Payment {payment_id}"))
-
-        conn.commit()
-        return {"success": True, "payment_id": payment_id, "amount_paise": amount_paise, "already_recorded": False}
-
-        payment_id = f"pay-{uuid.uuid4().hex[:10]}"
-
-        if commitment_id:
-            comm = conn.execute("SELECT id FROM vendor_commitments WHERE id = ? AND event_id = ?;", (commitment_id, event_id)).fetchone()
-            if not comm:
-                raise ValueError(f"Commitment '{commitment_id}' not found for event '{event_id}'")
-
-        if budget_item_id:
-            b_item = conn.execute("""
-                SELECT b.id FROM budget_items b 
-                JOIN scenarios s ON b.scenario_id = s.id 
-                WHERE b.id = ? AND s.event_id = ?;
-            """, (budget_item_id, event_id)).fetchone()
-            if not b_item:
-                raise ValueError(f"Budget item '{budget_item_id}' not found for event '{event_id}'")
-
-        conn.execute("""
-            INSERT INTO payments (id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, idempotency_key, paid_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """, (payment_id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, key, now_str))
+        """, (payment_id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, clean_ref, key, now_str))
 
         if commitment_id:
             conn.execute("""
@@ -1070,20 +1044,27 @@ def approve_vendor_quote_in_db(
     now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     with get_connection(target_path) as conn:
+        conn.execute("BEGIN IMMEDIATE;")
         data = get_event_by_id(event_id, target_path)
         if not data:
             raise ValueError(f"Event {event_id} not found")
 
+        fingerprint = json.dumps([vendor_name, category, items, advance_deposit_paise,
+                                  deposit_due_date, notes, supersedes_item_id, supersedes_item_ids], sort_keys=True)
         # Idempotency check
         if idempotency_key:
             existing = conn.execute("SELECT * FROM vendor_commitments WHERE event_id = ? AND idempotency_key = ?;", (event_id, idempotency_key)).fetchone()
             if existing:
+                if existing["request_fingerprint"] != fingerprint:
+                    raise ValueError("Idempotency conflict: approval key belongs to a different or older quote.")
                 return {"success": True, "commitment_id": existing["id"], "already_approved": True, "message": "Quote already approved with this key."}
 
         scenario_id = data["active_scenario"]["id"]
         guests = data["event"]["guest_count"]
         total_quote_paise = 0
         new_item_ids = []
+        if not items:
+            raise ValueError("A quote must contain at least one confirmed line item.")
 
         # Validate that unconfirmed zero prices cannot be approved without price input
         for it in items:
@@ -1093,7 +1074,7 @@ def approve_vendor_quote_in_db(
                 raise ValueError("Cannot approve quote with unconfirmed zero price. Please provide confirmed rate before committing.")
 
         # Mark superseded estimated items to eliminate double-counting with strict tenant isolation
-        if supersedes_item_ids:
+        if supersedes_item_ids is not None:
             for s_id in supersedes_item_ids:
                 row = conn.execute("SELECT id FROM budget_items WHERE id = ? AND scenario_id = ?;", (s_id, scenario_id)).fetchone()
                 if not row:
@@ -1117,7 +1098,7 @@ def approve_vendor_quote_in_db(
             cap = max(1, int(it.get("step_capacity", 1)))
             tax_rate = max(0, min(10000, int(it.get("tax_rate_bps", 0))))
 
-            calc = compute_line_item_paise(model, unit, guests, cap, tax_rate)
+            calc = compute_line_item_paise(model, unit, guests, cap, tax_rate, bool(it.get("is_tax_inclusive", False)))
             total_quote_paise += calc["total_paise"]
 
             item_id = f"item-quote-{uuid.uuid4().hex[:10]}"
@@ -1139,8 +1120,12 @@ def approve_vendor_quote_in_db(
                 deposit_due_date,
                 notes,
             ))
+            conn.execute("UPDATE budget_items SET is_tax_inclusive = ? WHERE id = ?;",
+                         (int(bool(it.get("is_tax_inclusive", False))), item_id))
 
         com_id = f"com-{uuid.uuid4().hex[:10]}"
+        if advance_deposit_paise > total_quote_paise:
+            raise ValueError("Advance cannot exceed the total quote. Review the extracted amount.")
         conn.execute("""
             INSERT INTO vendor_commitments (id, event_id, category, vendor_name, approval_state, total_quote_paise, deposit_required_paise, paid_amount_paise, deposit_due_date, hidden_fee_question, negotiation_script, raw_quote_text, is_reviewed, needs_reconfirmation, idempotency_key)
             VALUES (?, ?, ?, ?, 'APPROVED', ?, ?, 0, ?, ?, ?, ?, 1, 0, ?);
@@ -1157,6 +1142,7 @@ def approve_vendor_quote_in_db(
             notes or "Extracted & approved via Planqira",
             idempotency_key,
         ))
+        conn.execute("UPDATE vendor_commitments SET request_fingerprint = ? WHERE id = ?;", (fingerprint, com_id))
 
         conn.execute("""
             INSERT INTO audit_logs (event_id, timestamp, action_type, description, previous_value, new_value)

@@ -168,6 +168,53 @@ def test_payment_updates_cash_and_survives_refresh(page, server):
     expect(page.locator("#paymentsTableBody")).to_contain_text("ISOLATED-UI-TEST")
 
 
+def test_payment_retry_after_lost_response_does_not_duplicate_cash(page, server):
+    open_dashboard(page, server)
+    money = lambda text: float(text.replace('₹', '').replace(',', ''))
+    before = money(page.locator("#finPaid").inner_text())
+    attempts = []
+    def lose_first_response(route):
+        attempts.append(route.request.post_data_json)
+        if len(attempts) == 1:
+            response = route.fetch()
+            assert response.ok
+            route.abort("failed")
+        else:
+            route.continue_()
+    page.route("**/record-payment", lose_first_response)
+    page.locator("#navBtnBudget").click()
+    page.get_by_role("button", name="Record Payment", exact=True).click()
+    page.locator("#payAmountRs").fill("123")
+    page.locator("#payReference").fill("LOST-RESPONSE-RETRY")
+    page.get_by_role("button", name="Save payment", exact=True).click()
+    expect(page.get_by_text("Failed to fetch", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Save payment", exact=True).click()
+    expect(page.locator("#paymentModal")).to_be_hidden()
+    expect(page.locator("#paymentsTableBody")).to_contain_text("LOST-RESPONSE-RETRY")
+    assert money(page.locator("#finPaid").inner_text()) - before == 123
+    assert attempts[0]["idempotency_key"] == attempts[1]["idempotency_key"]
+
+
+def test_quote_price_edit_and_explicit_replacement_persist(page, server):
+    open_dashboard(page, server)
+    event_id = page.evaluate("currentEventId")
+    before = page.request.get(f"{server}/api/events/{event_id}").json()
+    page.locator("#workspaceAction").click()
+    page.locator("#rawQuoteInput").fill("Catering Rs 850 per plate including 5% GST. 40% advance.")
+    page.get_by_role("button", name="Read quote", exact=True).click()
+    expect(page.locator("#quoteReviewSection")).to_be_visible()
+    page.locator("#revItemsTableBody input").first.fill("900")
+    for checkbox in page.locator("#quoteReplacementChoices input").all():
+        checkbox.uncheck()
+    with page.expect_response(lambda response: response.url.endswith("/approve-quote")) as response:
+        page.locator("#btnApproveQuote").click()
+    assert response.value.ok
+    expect(page.locator("#quoteModal")).to_be_hidden()
+    after = page.request.get(f"{server}/api/events/{event_id}").json()
+    assert after["solvency"]["total_projected_paise"] - before["solvency"]["total_projected_paise"] == 90000 * before["event"]["guest_count"]
+    assert after["solvency"]["total_paid_paise"] == before["solvency"]["total_paid_paise"]
+
+
 def test_scenario_preview_does_not_change_saved_guests(page, server):
     open_dashboard(page, server)
     before = page.locator("#metaGuests").inner_text()

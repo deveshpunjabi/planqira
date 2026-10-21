@@ -130,7 +130,7 @@ def evaluate_event_solvency(
             b_id = p.get("budget_item_id")
             c_id = p.get("commitment_id")
             if b_id:
-                item_payments[b_id] += amt
+                item_payments[p.get("obligation_id") or b_id] += amt
                 allocated_sum += amt
             elif c_id:
                 allocated_sum += amt
@@ -158,7 +158,7 @@ def evaluate_event_solvency(
     total_projected_paise = 0
 
     for item in line_items:
-        is_incl = bool(item.get("is_tax_inclusive", False) or ("tax-inclusive" in str(item.get("notes", "")).lower()))
+        is_incl = bool(item.get("is_tax_inclusive", False))
         calc = compute_line_item_paise(
             pricing_model=item["pricing_model"],
             unit_cost_paise=item["unit_cost_paise"],
@@ -180,7 +180,7 @@ def evaluate_event_solvency(
             total_approved_commitments_paise += calc["total_paise"]
 
         # Item-specific cash paid from ledger or snapshot
-        item_id = item.get("id")
+        item_id = item.get("obligation_id") or item.get("id")
         paid = item_payments.get(item_id, item.get("paid_amount_paise", 0)) if item_id else item.get("paid_amount_paise", 0)
 
         pay_status: PaymentStatus
@@ -324,6 +324,20 @@ class DependencyDAG:
                 })
 
         return results
+
+
+def build_task_dag(tasks, dependencies):
+    """Use identical dependency rules for previews and saved changes."""
+    dag = DependencyDAG()
+    for task in tasks:
+        # Every preparation task must be reviewed when the date or venue setting changes.
+        triggers = ["date", "setting"]
+        if task.get("depends_on_guests"):
+            triggers.append("guests")
+        dag.add_node(task["id"], "TASK", task["title"],
+                     depends_on_ids=[parent for parent, child in dependencies if child == task["id"]],
+                     trigger_params=triggers, status=task["status"])
+    return dag
 
 
 def simulate_scenario_impact(

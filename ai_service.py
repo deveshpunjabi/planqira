@@ -87,8 +87,10 @@ def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150)
     active_model = get_active_model()
 
     if api_key and HAS_GENAI_LIB:
+        client = None
         try:
-            client = genai.Client(api_key=api_key)
+            client = genai.Client(api_key=api_key, http_options=types.HttpOptions(
+                timeout=20000, retry_options=types.HttpRetryOptions(attempts=1)))
             system_prompt = (
                 "You are an expert event auditor. Parse the raw vendor communication into structured line items. "
                 "CRITICAL RULES:\n"
@@ -97,7 +99,9 @@ def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150)
                 "3. Convert all rupee currency amounts to integer paise (1 Rupee = 100 Paise).\n"
                 "4. Extract GST or tax % as basis points (e.g., 18% = 1800, 5% = 500).\n"
                 "5. Only list clauses explicitly mentioned (e.g. generator diesel, overtime, corkage) in explicit_clauses_extracted.\n"
-                "6. General protection questions belong in suggested_clarification_questions."
+                "6. General protection questions belong in suggested_clarification_questions.\n"
+                "7. Set is_tax_inclusive=true when GST is included; preserve the gross unit price.\n"
+                "8. Advances are payment obligations, never additional purchase line items."
             )
 
             prompt_content = f"Event Headcount Context: {current_guest_count} guests\nVendor Text:\n{sanitized_text}"
@@ -127,6 +131,9 @@ def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150)
         except Exception as e:
             # Fall back honestly to heuristic parser
             pass
+        finally:
+            if client is not None:
+                client.close()
 
     # Credential-Free Heuristic Extraction (Disclosed & Honest)
     heuristic_data = _heuristic_quote_parser(sanitized_text, current_guest_count)

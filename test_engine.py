@@ -1103,3 +1103,101 @@ def test_unconfirmed_zero_price_quote_approval_blocked():
             category="Photography",
             items=data["extracted_items"],
         )
+
+
+def test_inclusive_quote_survives_approval_commit_restore_and_payment(client):
+    event_id = create_event({"title": "Inclusive tax", "event_type": "birthday", "city": "Delhi",
+                            "event_date": "2027-12-01", "guest_count": 100,
+                            "target_budget_paise": 50000000})["event_id"]
+    parsed = parse_vendor_quote_text("Catering Rs 850 per plate including 5% GST. 40% advance.", 100)["data"]
+    response = client.post(f"/api/events/{event_id}/approve-quote", json={
+        "vendor_name": "Caterer", "category": "Food", "items": parsed["extracted_items"],
+        "advance_deposit_paise": parsed["advance_deposit_paise"], "idempotency_key": "inclusive"})
+    assert response.status_code == 200
+    approved = response.json()
+    assert approved["total_quote_paise"] == 8500000
+    record_payment(event_id, 3400000, "UPI", "Advance", budget_item_id=approved["item_ids"][0])
+    for count in (120, 100):
+        if count == 120:
+            commit_scenario_version(event_id, 120)
+        else:
+            revert_scenario_version(event_id, 1, "Restore original")
+        state = client.get(f"/api/events/{event_id}").json()
+        item = next(it for it in state["solvency"]["items"] if it["name"] == parsed["extracted_items"][0]["name"])
+        assert item["total_paise"] == 85000 * count
+        assert item["paid_amount_paise"] == 3400000
+        assert item["calculated_payment_status"] == "PARTIAL"
+        assert state["solvency"]["total_paid_paise"] == 3400000
+
+
+@pytest.mark.parametrize("field,value", [("event_date", "2027-02-30"), ("start_time", "27:81"),
+                                        ("timezone", "Moon/Crater"), ("currency", "USD")])
+def test_rejects_invalid_calendar_and_unsupported_currency(client, field, value):
+    payload = {"title": "Validation event", "event_type": "birthday", "city": "Delhi",
+               "event_date": "2027-12-01", "guest_count": 100, "target_budget_paise": 50000000}
+    payload[field] = value
+    assert client.post("/api/events", json=payload).status_code == 422
+
+
+def test_same_day_and_fractional_overnight_schedule(client):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    event_id = create_event({"title": "Late celebration", "event_type": "birthday", "city": "Delhi",
+                            "event_date": today, "start_time": "23:30", "duration_hours": 1.5,
+                            "guest_count": 50, "target_budget_paise": 5000000})["event_id"]
+    state = get_event_by_id(event_id)
+    assert all(task["due_date"] == today for task in state["tasks"])
+    assert state["runbook"][-1]["time_slot"].endswith("01:00 (+1d)")
+    calendar = client.get(f"/api/events/{event_id}/export.ics").text
+    assert f"DTSTART:{today.replace('-', '')}T180000Z" in calendar
+    assert calendar.count("DTSTART:") == 4  # main event plus three timed runbook cues
+    assert f"DTEND:{today.replace('-', '')}T193000Z" in calendar
+
+
+def test_payment_key_rejects_changed_reference(client):
+    event_id = client.get("/api/events").json()["events"][0]["id"]
+    payload = {"amount_paise": 10000, "payment_method": "UPI", "reference_note": "First",
+               "idempotency_key": "same-operation"}
+    assert client.post(f"/api/events/{event_id}/record-payment", json=payload).status_code == 200
+    payload["reference_note"] = "Different transfer"
+    assert client.post(f"/api/events/{event_id}/record-payment", json=payload).status_code == 409
+
+
+@pytest.mark.parametrize("items", [[], [{"name": "Bad", "pricing_model": "FIXED", "unit_cost_paise": -1}],
+                                    [{"name": "Bad", "pricing_model": "FIXED", "unit_cost_paise": 1.5}]])
+def test_quote_rejects_malformed_financial_input(client, items):
+    event_id = client.get("/api/events").json()["events"][0]["id"]
+    assert client.post(f"/api/events/{event_id}/approve-quote", json={
+        "vendor_name": "Test", "category": "Food", "items": items}).status_code == 422
+
+
+@pytest.mark.parametrize("change", [{"new_guests": 400}, {"new_date": "2027-12-31"}, {"new_setting": "indoor"}])
+def test_saved_dependency_flags_match_preview_without_client_task_ids(client, change):
+    event_id = client.get("/api/events").json()["events"][0]["id"]
+    before = client.get(f"/api/events/{event_id}").json()["event"]
+    payload = {"new_guests": before["guest_count"], **change}
+    preview = client.post(f"/api/events/{event_id}/simulate", json=payload).json()
+    affected = {item["id"] for item in preview["dag_impacts"]}
+    assert affected
+    response = client.post(f"/api/events/{event_id}/commit-scenario", json={
+        **payload, "note": "Dependency regression", "base_version": before["active_scenario_version"]})
+    assert response.status_code == 200
+    tasks = client.get(f"/api/events/{event_id}").json()["tasks"]
+    assert all(task["status"] == "NEEDS_REVIEW" for task in tasks if task["id"] in affected)
+
+
+def test_quote_retry_conflict_and_oversized_deposit_rollback(client):
+    event_id = client.get("/api/events").json()["events"][0]["id"]
+    payload = {"vendor_name": "Retry vendor", "category": "Decor", "idempotency_key": "quote-retry",
+               "items": [{"name": "Flowers", "pricing_model": "FIXED", "unit_cost_paise": 10000}]}
+    endpoint = f"/api/events/{event_id}/approve-quote"
+    assert client.post(endpoint, json=payload).status_code == 200
+    assert client.post(endpoint, json=payload).json()["already_approved"]
+    payload["items"][0]["unit_cost_paise"] = 20000
+    assert client.post(endpoint, json=payload).status_code == 409
+    before = client.get(f"/api/events/{event_id}").json()["solvency"]["total_projected_paise"]
+    payload["idempotency_key"] = "new-quote"
+    payload["advance_deposit_paise"] = 30000
+    assert client.post(endpoint, json=payload).status_code == 400
+    assert client.get(f"/api/events/{event_id}").json()["solvency"]["total_projected_paise"] == before

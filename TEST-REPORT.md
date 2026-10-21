@@ -2,9 +2,9 @@
 
 ## Current result
 
-**40 tests passed locally:** 29 backend tests and 11 browser checks. After visual inspection identified clipped financial values, the three responsive cases were rerun after the CSS fix and passed.
+**64 tests passed locally:** 51 backend cases and 13 Chromium browser cases. These are regression checks, not a guarantee of zero defects or a PromptWars score.
 
-The browser suite now manages its own server and isolated SQLite database. It no longer assumes a server on port 8080, writes artifacts to a hardcoded developer folder, or silently skips a calculator assertion when its selector is missing. Existing route tests use the new user-facing workspace label.
+The audit baseline passed 48 tests. Additional workflow tests cover inclusive-tax quote approval/reload/revisions, payment allocation through restores, invalid calendar inputs, same-day scheduling, overnight calendar times, malformed financial inputs, dependency preview/save parity, approval conflicts and rollback, lost-response payment retry, and editable quote approval with explicit replacement choices.
 
 ## Browser coverage
 
@@ -31,4 +31,4 @@ Tests use temporary data and no provider credentials. Optional `PLAYWRIGHT_EXECU
 
 ## What this does not certify
 
-No production PostgreSQL path exists yet. No deployed durability test, user-authorization audit, complete calendar-standard validation, or live AI/model check was completed by this run. Scenario commits still accept client-supplied financial item dictionaries. Passing tests do not prove every claim in the earlier delivery report. Refer to the README's release limitations before presenting the project as finalized.
+No production PostgreSQL path exists yet. No deployed durability test, user-authorization audit, complete calendar-standard validation, or live AI/model check was completed by this run. Scenario commit costs are derived from saved items; client financial dictionaries are ignored. New revisions preserve payment lineage; older revisions created before that lineage was recorded may require manual reconciliation. Passing tests do not prove every claim in the earlier delivery report. Refer to the README's release limitations before presenting the project as finalized.

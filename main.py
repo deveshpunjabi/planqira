@@ -6,7 +6,8 @@ transactional scenario commits, payment recording, and RFC-compliant exporters.
 
 from contextlib import asynccontextmanager
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import io
 import os
 import re
@@ -23,7 +24,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ai_service import get_active_model, parse_vendor_quote_text
 from database import (
@@ -41,7 +42,7 @@ from database import (
     update_task_status,
 )
 from engine import (
-    DependencyDAG,
+    build_task_dag,
     evaluate_event_solvency,
     simulate_scenario_impact,
 )
@@ -63,18 +64,54 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[origin.strip() for origin in os.getenv("PLANQIRA_ALLOWED_ORIGINS", "").split(",") if origin.strip()],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.path.startswith("/api/events"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # =====================================================================
 # REQUEST & RESPONSE SCHEMAS (Strict Pydantic Validation)
 # =====================================================================
 
-class CreateEventRequest(BaseModel):
+class CalendarRequest(BaseModel):
+    @field_validator("event_date", "new_date", "deposit_due_date", check_fields=False)
+    @classmethod
+    def valid_date(cls, value):
+        if value is not None:
+            datetime.strptime(value, "%Y-%m-%d")
+        return value
+
+    @field_validator("start_time", check_fields=False)
+    @classmethod
+    def valid_time(cls, value):
+        datetime.strptime(value, "%H:%M")
+        return value
+
+    @field_validator("timezone", check_fields=False)
+    @classmethod
+    def valid_timezone(cls, value):
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError("Choose a valid IANA timezone, for example Asia/Kolkata")
+        return value
+
+
+class CreateEventRequest(CalendarRequest):
     title: str = Field(..., min_length=3, max_length=120)
     event_type: str = Field(..., min_length=2, max_length=50)
     city: str = Field(..., min_length=2, max_length=80)
@@ -85,19 +122,19 @@ class CreateEventRequest(BaseModel):
     setting: Literal["indoor", "outdoor", "hybrid"] = "outdoor"
     guest_count: int = Field(..., ge=1, le=10000)
     target_budget_paise: int = Field(..., gt=0)
-    currency: str = Field("INR", min_length=3, max_length=3)
+    currency: Literal["INR"] = "INR"
     contingency_bps: int = Field(1000, ge=0, le=5000)  # Default 10%
     preferences: Optional[Dict[str, Any]] = None
 
 
-class SimulateRequest(BaseModel):
+class SimulateRequest(CalendarRequest):
     new_guests: int = Field(..., ge=1, le=10000, description="Target simulated guest headcount")
     new_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     new_setting: Optional[Literal["indoor", "outdoor", "hybrid"]] = None
     base_version: Optional[int] = Field(None, ge=1)
 
 
-class CommitScenarioRequest(BaseModel):
+class CommitScenarioRequest(CalendarRequest):
     new_guests: int = Field(..., ge=1, le=10000)
     new_budget_items: Optional[List[Dict[str, Any]]] = None
     note: str = Field(..., min_length=3, max_length=200)
@@ -116,10 +153,20 @@ class QuoteParseRequest(BaseModel):
     raw_quote_text: str = Field(..., min_length=5, max_length=4000)
 
 
-class ApproveQuoteRequest(BaseModel):
+class QuoteItem(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    pricing_model: Literal["FIXED", "PER_CAPITA", "STEP_TIERED"]
+    unit_cost_paise: int = Field(ge=0, strict=True)
+    step_capacity: int = Field(1, ge=1, strict=True)
+    tax_rate_bps: int = Field(0, ge=0, le=10000, strict=True)
+    is_tax_inclusive: bool = False
+    notes: Optional[str] = Field(None, max_length=4000)
+
+
+class ApproveQuoteRequest(CalendarRequest):
     vendor_name: str = Field(..., min_length=1, max_length=120)
     category: str = Field(..., min_length=1, max_length=60)
-    items: List[Dict[str, Any]]
+    items: List[QuoteItem] = Field(min_length=1, max_length=100)
     advance_deposit_paise: int = Field(0, ge=0)
     deposit_due_date: Optional[str] = None
     notes: Optional[str] = None
@@ -227,26 +274,7 @@ def simulate_scenario(event_id: str, req: SimulateRequest):
     tasks = data["tasks"]
     deps = data["dependencies"]
 
-    # Construct real dependency DAG
-    dag = DependencyDAG()
-    for t in tasks:
-        parent_ids = [parent for parent, child in deps if child == t["id"]]
-        trigger_params = []
-        if t["depends_on_guests"]:
-            trigger_params.append("guests")
-        if "outdoor" in t["title"].lower() or "weather" in t["title"].lower():
-            trigger_params.append("setting")
-        if "date" in t["title"].lower() or "schedule" in t["title"].lower():
-            trigger_params.append("date")
-
-        dag.add_node(
-            node_id=t["id"],
-            node_type="TASK",
-            title=t["title"],
-            depends_on_ids=parent_ids,
-            trigger_params=trigger_params,
-            status=t["status"],
-        )
+    dag = build_task_dag(tasks, deps)
 
     # Run side-by-side simulation
     sim_result = simulate_scenario_impact(
@@ -319,7 +347,7 @@ def approve_quote(event_id: str, req: ApproveQuoteRequest):
             event_id=event_id,
             vendor_name=req.vendor_name,
             category=req.category,
-            items=req.items,
+            items=[item.model_dump() for item in req.items],
             advance_deposit_paise=req.advance_deposit_paise,
             deposit_due_date=req.deposit_due_date,
             notes=req.notes,
@@ -566,8 +594,9 @@ def export_ics(event_id: str):
     try:
         base_dt = datetime.strptime(f"{evt_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
         end_dt = base_dt + timedelta(hours=duration)
-        main_start = base_dt.strftime("%Y%m%dT%H%M00")
-        main_end = end_dt.strftime("%Y%m%dT%H%M00")
+        event_zone = ZoneInfo(evt.get("timezone", "Asia/Kolkata"))
+        main_start = base_dt.replace(tzinfo=event_zone).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        main_end = end_dt.replace(tzinfo=event_zone).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
         # Main celebration master event
         raw_lines.extend([
@@ -597,12 +626,25 @@ def export_ics(event_id: str):
         uid = f"runbook-{rb['id']}@planqira.local"
         summary = _escape_ics_text(f"[Runbook] {rb['time_slot']} - {rb['lead_role']}")
         desc = _escape_ics_text(f"Guest: {rb['front_of_house']} | Crew: {rb['back_of_house']}")
+        timing_lines = [f"DTSTART;VALUE=DATE:{dt_start_date}", f"DTEND;VALUE=DATE:{dt_end_date}"]
+        clock_times = re.findall(r"(\d{2}):(\d{2})(?: \(\+(\d+)d\))?", rb["time_slot"])
+        if len(clock_times) == 2:
+            zone = ZoneInfo(evt.get("timezone", "Asia/Kolkata"))
+            start_clock, end_clock = clock_times
+            def cue_datetime(clock):
+                hour, minute, day = clock
+                return datetime.strptime(evt_date_str, "%Y-%m-%d").replace(
+                    hour=int(hour), minute=int(minute), tzinfo=zone) + timedelta(days=int(day or 0))
+            cue_start, cue_end = cue_datetime(start_clock), cue_datetime(end_clock)
+            if cue_end <= cue_start:
+                cue_end += timedelta(days=1)
+            timing_lines = [f"DTSTART:{cue_start.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
+                            f"DTEND:{cue_end.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"]
         raw_lines.extend([
             "BEGIN:VEVENT",
             f"UID:{uid}",
             f"DTSTAMP:{now_stamp}",
-            f"DTSTART;VALUE=DATE:{dt_start_date}",
-            f"DTEND;VALUE=DATE:{dt_end_date}",
+            *timing_lines,
             f"SUMMARY:{summary}",
             f"DESCRIPTION:{desc}",
             f"STATUS:{'CONFIRMED' if rb['status'] == 'COMPLETED' else 'TENTATIVE'}",

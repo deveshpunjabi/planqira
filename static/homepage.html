@@ -99,7 +99,7 @@
         </div>
         <h2 class="section-title">Experience Deterministic Scaling in Real Time</h2>
         <p class="section-subtitle">
-          Toggle event profiles, slide guest headcounts, and adjust venue settings below. Watch Planqira’s mathematical solver recalculate catering, step-tiered seating, and solvency instantly—with zero floating-point approximation.
+          Explore an illustrative budget with guest-based catering and seating estimates. Open the dashboard to preview changes against your saved event. Venue changes require a fresh quote; they do not automatically change contracted prices.
         </p>
 
         <div class="demo-widget-card">
@@ -733,10 +733,7 @@
       const audioTotal = p.fixedAudioPhotoPaise + audioTax;
 
       // Setting adjustment
-      let settingFactor = 1.0;
-      if (setting === "indoor") settingFactor = 0.95;
-      if (setting === "hybrid") settingFactor = 1.08;
-      const adjustedVenueTotal = Math.floor(venueTotal * settingFactor);
+      const adjustedVenueTotal = venueTotal;
 
       // Projected Outlay
       const projectedTotal = cateringTotal + tablesTotal + buffetTotal + adjustedVenueTotal + decorTotal + audioTotal;
@@ -785,17 +782,17 @@
       const li3 = document.createElement("li");
       li3.className = "feed-item";
       if (setting === "outdoor") {
-        li3.textContent = "Outdoor Setting: Weather pivot protocol active (T-6h lawn-to-hall contingency)";
+        li3.textContent = "Outdoor: discuss a weather backup with your venue.";
       } else if (setting === "indoor") {
-        li3.textContent = "Indoor Hall: Acoustic noise limiter enforced past 10:30 PM";
+        li3.textContent = "Indoor: confirm sound restrictions and access with your venue.";
       } else {
-        li3.textContent = "Hybrid Canopy: Water runoff trenching and portico walkway required";
+        li3.textContent = "Hybrid: confirm sheltered walkways and weather arrangements.";
       }
       feed.appendChild(li3);
 
       const li4 = document.createElement("li");
       li4.className = "feed-item";
-      li4.textContent = "DAG Dependency: Milestones 'Confirm Seating' and 'Table Florals' flagged for reverification";
+      li4.textContent = "Open Explore changes to review affected tasks before saving.";
       feed.appendChild(li4);
 
       // Deep link button with event, guests, and setting parameter parity

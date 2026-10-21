@@ -8,6 +8,8 @@ let currentEventId = "";
 let currentEventData = null;
 let latestSimResult = null;
 let parsedQuoteData = null;
+let quoteOperationKey = null;
+let paymentOperation = null;
 
 const sampleQuotes = {
   1: "Namaste! This is Udaipur Royal Feast Caterers. For your Royal Wedding, our Signature Dal Baati Churma & Multi-Cuisine Dinner Buffet is Rs 2200 per guest + 5% GST. Minimum advance token is Rs 150000 to lock date by 25th Oct. Note: Kitchen diesel and generator cylinder fuel charged extra Rs 15000.",
@@ -749,6 +751,8 @@ async function submitCreateEvent() {
 
 // AI Quote Modal
 function openQuoteModal() {
+  parsedQuoteData = null;
+  quoteOperationKey = null;
   openModal("quoteModal");
   document.getElementById("quoteReviewSection").style.display = "none";
   document.getElementById("btnApproveQuote").style.display = "none";
@@ -757,6 +761,8 @@ function loadSampleQuote(idx) {
   document.getElementById("rawQuoteInput").value = sampleQuotes[idx] || "";
 }
 async function parseQuoteAction() {
+  parsedQuoteData = null;
+  document.getElementById("btnApproveQuote").style.display = "none";
   const text = document.getElementById("rawQuoteInput").value.trim();
   if (!text) {
     showNotice("Please enter or paste vendor message text.");
@@ -774,6 +780,7 @@ async function parseQuoteAction() {
     const parsed = await res.json();
     ind.textContent = parsed.is_simulated ? "Basic parser · check every term before approval" : `AI-assisted · ${parsed.model_used || 'configured model'} · review before approval`;
     parsedQuoteData = parsed.data;
+    quoteOperationKey = crypto.randomUUID();
 
     document.getElementById("quoteReviewSection").style.display = "block";
     document.getElementById("btnApproveQuote").style.display = "inline-flex";
@@ -790,11 +797,25 @@ async function parseQuoteAction() {
       const tr = el("tr", {}, [
         el("td", { style: { fontWeight: "600" } }, it.name),
         el("td", {}, it.pricing_model),
-        el("td", { className: "numeric" }, formatPaise(it.unit_cost_paise)),
-        el("td", { className: "numeric" }, `${it.tax_rate_bps / 100}%`)
+        el("td", { className: "numeric" }, el("input", {
+          type: "number", min: "0", step: "0.01", value: (it.unit_cost_paise / 100).toFixed(2),
+          className: "form-control", "aria-label": `Confirmed unit price in rupees for ${it.name}`,
+          oninput: event => { it.unit_cost_paise = Math.round(Number(event.target.value) * 100); }
+        })),
+        el("td", { className: "numeric" }, `${it.tax_rate_bps / 100}% ${it.is_tax_inclusive ? 'included' : 'additional'}`)
       ]);
       tbody.appendChild(tr);
     });
+
+    const choices = document.getElementById("quoteReplacementChoices");
+    choices.replaceChildren();
+    const estimates = currentEventData.solvency.items.filter(item => item.approval_state === "ESTIMATED");
+    estimates.forEach(item => {
+      const checkbox = el("input", {type: "checkbox", value: item.id});
+      checkbox.checked = item.category === parsedQuoteData.category;
+      choices.appendChild(el("label", {style: {display: "block", marginBottom: "0.4rem"}}, [checkbox, ` ${item.name}`]));
+    });
+    if (!estimates.length) choices.textContent = "No estimates to replace. This quote adds a new commitment.";
 
     const flagBox = document.getElementById("revClausesBox");
     const flagList = document.getElementById("revClausesList");
@@ -824,7 +845,8 @@ async function approveQuoteAction() {
       advance_deposit_paise: parsedQuoteData.advance_deposit_paise,
       deposit_due_date: parsedQuoteData.deposit_due_date,
       notes: "Extracted and verified via Planqira",
-      idempotency_key: `idem-${Date.now()}`
+      supersedes_item_ids: [...document.querySelectorAll('#quoteReplacementChoices input:checked')].map(input => input.value),
+      idempotency_key: quoteOperationKey
     };
 
     const res = await requestAPI(`/api/events/${currentEventId}/approve-quote`, {
@@ -840,7 +862,7 @@ async function approveQuoteAction() {
     }
   } catch (e) {
     console.error("Approval error:", e);
-    showNotice("Failed to approve quote.");
+    showNotice(e.message || "Failed to approve quote.");
   }
 }
 
@@ -859,24 +881,29 @@ async function submitRecordPayment() {
   }
 
   try {
+    const paymentPayload = { amount_paise: Math.round(amtRs * 100), payment_method: method, reference_note: note };
+    const fingerprint = JSON.stringify([currentEventId, paymentPayload]);
+    if (!paymentOperation || paymentOperation.fingerprint !== fingerprint) {
+      paymentOperation = { fingerprint, key: crypto.randomUUID() };
+    }
     const res = await requestAPI(`/api/events/${currentEventId}/record-payment`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        amount_paise: Math.round(amtRs * 100),
-        payment_method: method,
-        reference_note: note
+        ...paymentPayload,
+        idempotency_key: paymentOperation.key
       })
     });
     const data = await res.json();
     if (data.success) {
+      paymentOperation = null;
       showNotice(`Recorded actual cash payment of ₹${amtRs.toLocaleString('en-IN')}`);
       closeModal("paymentModal");
       await loadEventDetails(currentEventId);
     }
   } catch (e) {
     console.error("Payment error:", e);
-    showNotice("Failed to record payment.");
+    showNotice(e.message || "Failed to record payment.");
   }
 }
 

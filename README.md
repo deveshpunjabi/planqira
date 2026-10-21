@@ -58,7 +58,7 @@ python -m playwright install chromium
 python -m pytest test_engine.py test_e2e_playwright.py
 ```
 
-The test suite passes **37 backend tests and 11 browser checks (48 total)**. Browser tests start their own loopback server and use a temporary database; no manually running server is needed. They cover navigation, refresh, error recovery, loading/empty states, quote review, payment persistence, scenario previews, dialog focus, exports, and layouts at 390/768/1440 pixels. See [TEST-REPORT.md](TEST-REPORT.md) for scope and limitations.
+The test suite passes **51 backend tests and 13 browser checks (64 total)**. Browser tests start their own loopback server and use a temporary database; no manually running server is needed. They cover navigation, refresh, error recovery, loading/empty states, quote review, payment persistence, scenario previews, dialog focus, exports, and layouts at 390/768/1440 pixels. See [TEST-REPORT.md](TEST-REPORT.md) for scope and limitations.
 
 For an existing compatible browser installation, tests accept `PLAYWRIGHT_EXECUTABLE_PATH`. Optional `PLANQIRA_SCREENSHOT_DIR` saves preview images outside the repository. GitHub Actions installs browser dependencies and runs both suites.
 
@@ -75,13 +75,21 @@ For an existing compatible browser installation, tests accept `PLAYWRIGHT_EXECUT
 - **Revision Revert & Snapshot Fidelity:** Reverting a scenario restores historical `event_date` and `setting`, snapshots `event_date` on new forward revisions, and supports repeated restore-of-restore.
 - **Server-Owned Dependency Invalidation:** Task review flags (`NEEDS_REVIEW`) and vendor reconfirmations are computed authoritatively on the server using `DependencyDAG` when guest count, setting, or date shift.
 
+## Latest audit repairs
+
+Tax-inclusive prices now persist through approval, reload, scenario changes, and restores. Item-linked payments keep their allocation across newly created revisions. Scenario preview and save share task-dependency rules. Quote review allows price correction and explicitly selecting replaced estimates. Payment retries reuse an operation key; changed payloads under the same key are rejected.
+
+Calendar inputs validate real dates, times, and IANA timezones. Timed calendar entries export in UTC, including overnight runbook cues. Short-notice tasks no longer start yesterday. Browser CORS defaults to same-origin; optional `PLANQIRA_ALLOWED_ORIGINS` allows explicit frontend origins. This is not an authentication mechanism.
+
+The homepage calculator is illustrative and does not read the current saved ledger. A venue-setting change requires vendor reconfirmation, not an automatic price adjustment. Legacy records whose original inclusive-tax flag or payment lineage was never stored need manual reconciliation; migrations cannot reconstruct missing history reliably.
+
 ## Deployment and current limits
 
 The repository includes a Vercel ASGI entry point and routing configuration. **Vercel is currently a demonstration deployment:** SQLite is stored in `/tmp`, which is not durable shared storage across serverless instances. `DATABASE_URL` is detected but does not activate a PostgreSQL adapter. Managed PostgreSQL support is unfinished.
 
 Other remaining release work:
 
-- Event-scoped object checks do not provide multi-user authentication or session login.
+- Event-scoped object checks do not provide multi-user authentication or session login. Public demo data is shared; use fictional information only.
 - Live provider/model compatibility was not verified in the isolated regression run.
 - Automated browser checks are not a full accessibility audit or production certification.
 
