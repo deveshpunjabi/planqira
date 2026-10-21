@@ -5,6 +5,7 @@ foreign keys, payment ledgers, incident logging, and audit trail.
 """
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import os
 import sqlite3
@@ -218,12 +219,29 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         ("vendor_commitments", "needs_reconfirmation", "INTEGER NOT NULL DEFAULT 0"),
         ("vendor_commitments", "idempotency_key", "TEXT"),
         ("tasks", "reverification_reason", "TEXT"),
+        ("scenarios", "event_date", "TEXT"),
+        ("payments", "idempotency_key", "TEXT"),
     ]
     for table, col, col_def in migrations:
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def};")
         except sqlite3.OperationalError:
             pass  # Column already exists
+
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_event_idempotency_unique ON payments(event_id, idempotency_key);")
+    except sqlite3.OperationalError:
+        pass
+
+    # Backfill scenarios.event_date from events.event_date where null
+    try:
+        conn.execute("""
+            UPDATE scenarios 
+            SET event_date = (SELECT event_date FROM events WHERE events.id = scenarios.event_id)
+            WHERE event_date IS NULL;
+        """)
+    except sqlite3.OperationalError:
+        pass
 
 
 def seed_demo_events(conn: sqlite3.Connection) -> None:
@@ -239,9 +257,9 @@ def seed_demo_events(conn: sqlite3.Connection) -> None:
 
     sc_w_id = "sc-wedding-v1"
     conn.execute("""
-        INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-    """, (sc_w_id, w_id, 1, "Baseline Master Plan", 250, 120000000, "outdoor", "ACTIVE", now_str))
+        INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, event_date, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    """, (sc_w_id, w_id, 1, "Baseline Master Plan", 250, 120000000, "outdoor", "2026-11-25", "ACTIVE", now_str))
 
     wedding_items = [
         ("item-w-venue", sc_w_id, "Venue & Space", "Heritage Haveli Grand Lawn", "FIXED", 30000000, 1, 1800, "APPROVED", 10000000, 10000000, "2026-10-30", None, "Includes 2 rehearsal buffer hours"),
@@ -320,9 +338,9 @@ def seed_demo_events(conn: sqlite3.Connection) -> None:
 
     sc_b_id = "sc-birthday-v1"
     conn.execute("""
-        INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-    """, (sc_b_id, b_id, 1, "Birthday Master Plan", 75, 35000000, "indoor", "ACTIVE", now_str))
+        INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, event_date, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    """, (sc_b_id, b_id, 1, "Birthday Master Plan", 75, 35000000, "indoor", "2026-12-05", "ACTIVE", now_str))
 
     birthday_items = [
         ("item-b-venue", sc_b_id, "Venue & Space", "Indiranagar Rooftop Glasshouse", "FIXED", 12000000, 1, 1800, "APPROVED", 5000000, 5000000, "2026-11-15", None, "Includes bar license"),
@@ -388,9 +406,9 @@ def seed_demo_events(conn: sqlite3.Connection) -> None:
 
     sc_e_id = "sc-ecofest-v1"
     conn.execute("""
-        INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-    """, (sc_e_id, e_id, 1, "Community Master Plan", 400, 80000000, "outdoor", "ACTIVE", now_str))
+        INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, event_date, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    """, (sc_e_id, e_id, 1, "Community Master Plan", 400, 80000000, "outdoor", "2026-11-15", "ACTIVE", now_str))
 
     eco_items = [
         ("item-e-venue", sc_e_id, "Venue & Space", "Model Botanical Gardens Open Amphitheatre", "FIXED", 15000000, 1, 0, "APPROVED", 15000000, 15000000, "2026-10-20", None, "Municipal civic permit paid"),
@@ -476,9 +494,9 @@ def create_event(event_data: Dict[str, Any], db_path: Optional[str] = None) -> D
         """, (event_id, title, event_type, city, event_date, start_time, duration_hours, timezone, setting, guests, target_budget_paise, currency, contingency_bps, json.dumps(prefs), now_str))
 
         conn.execute("""
-            INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, status, created_at)
-            VALUES (?, ?, 1, 'Initial Blueprint', ?, ?, ?, 'ACTIVE', ?);
-        """, (scenario_id, event_id, guests, target_budget_paise, setting, now_str))
+            INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, event_date, status, created_at)
+            VALUES (?, ?, 1, 'Initial Blueprint', ?, ?, ?, ?, 'ACTIVE', ?);
+        """, (scenario_id, event_id, guests, target_budget_paise, setting, event_date, now_str))
 
         # Personalize catering, tasks, and decor from user preferences
         dietary_pref = str(prefs.get("dietary", "")).lower()
@@ -681,6 +699,7 @@ def commit_scenario_version(
     note: str = "Scenario proposal",
     base_version: Optional[int] = None,
     new_setting: Optional[str] = None,
+    setting: Optional[str] = None,
     new_date: Optional[str] = None,
     invalidated_task_ids: Optional[List[str]] = None,
     db_path: Optional[str] = None,
@@ -703,26 +722,25 @@ def commit_scenario_version(
 
         new_version = old_version + 1
         new_sc_id = f"sc-{event_id}-v{new_version}"
-        setting = new_setting or evt["setting"]
+        chosen_setting = (new_setting or setting or evt["setting"]).lower()
 
-        # Determine budget items: use provided or scale from active scenario
-        items_to_insert = new_budget_items
-        if items_to_insert is None or len(items_to_insert) == 0:
-            active_sc = conn.execute("SELECT id FROM scenarios WHERE event_id = ? AND status = 'ACTIVE';", (event_id,)).fetchone()
-            if active_sc:
-                prev_rows = conn.execute("SELECT * FROM budget_items WHERE scenario_id = ?;", (active_sc["id"],)).fetchall()
-                items_to_insert = [dict(r) for r in prev_rows]
-            else:
-                items_to_insert = []
+        # Determine budget items authoritatively from the active scenario (P0: prevent client cost forgery)
+        active_sc = conn.execute("SELECT * FROM scenarios WHERE event_id = ? AND status = 'ACTIVE';", (event_id,)).fetchone()
+        if not active_sc:
+            raise ValueError(f"No active scenario found for event {event_id}")
+
+        prev_rows = conn.execute("SELECT * FROM budget_items WHERE scenario_id = ?;", (active_sc["id"],)).fetchall()
+        items_to_insert = [dict(r) for r in prev_rows]
 
         # Archive old active scenario
         conn.execute("UPDATE scenarios SET status = 'ARCHIVED' WHERE event_id = ? AND status = 'ACTIVE';", (event_id,))
 
-        # Create new scenario
+        # Create new scenario with event_date snapshot
+        scenario_date = new_date or evt["event_date"]
         conn.execute("""
-            INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?);
-        """, (new_sc_id, event_id, new_version, f"Scenario v{new_version} ({note})", new_guests, evt["target_budget_paise"], setting, now_str))
+            INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, event_date, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?);
+        """, (new_sc_id, event_id, new_version, f"Scenario v{new_version} ({note})", new_guests, evt["target_budget_paise"], chosen_setting, scenario_date, now_str))
 
         # Insert new budget items with unique IDs, preserving approvals
         for idx, it in enumerate(items_to_insert):
@@ -747,17 +765,53 @@ def commit_scenario_version(
                 it.get("notes"),
             ))
 
-        # Persist affected tasks as needing review (including completed tasks whose preconditions shifted)
+        # Authoritatively evaluate shifted parameters and DAG task invalidations
+        changed_params = []
+        if new_guests != evt["guest_count"]:
+            changed_params.append("guests")
+        if scenario_date != evt["event_date"]:
+            changed_params.append("date")
+        if chosen_setting != evt["setting"].lower():
+            changed_params.append("setting")
+
+        all_task_ids_to_invalidate = set()
+        if changed_params:
+            try:
+                from engine import DependencyDAG
+                task_rows = conn.execute("SELECT * FROM tasks WHERE event_id = ?;", (event_id,)).fetchall()
+                dep_rows = conn.execute("""
+                    SELECT td.parent_task_id, td.child_task_id 
+                    FROM task_dependencies td
+                    JOIN tasks t ON td.parent_task_id = t.id
+                    WHERE t.event_id = ?;
+                """, (event_id,)).fetchall()
+
+                dag = DependencyDAG(
+                    tasks=[dict(t) for t in task_rows],
+                    dependencies=[dict(d) for d in dep_rows],
+                )
+                server_impacts = dag.propagate_invalidation(changed_params)
+                all_task_ids_to_invalidate.update(imp["id"] for imp in server_impacts if imp["type"] == "TASK")
+            except Exception:
+                pass
+
+        # Union with valid client-supplied task IDs strictly belonging to this event
         if invalidated_task_ids:
             for tid in invalidated_task_ids:
-                t_row = conn.execute("SELECT status FROM tasks WHERE id = ? AND event_id = ?;", (tid, event_id)).fetchone()
-                prev_st = t_row["status"] if t_row else "UNKNOWN"
-                conn.execute("""
-                    UPDATE tasks SET status = 'NEEDS_REVIEW', reverification_reason = ? WHERE id = ? AND event_id = ?;
-                """, (f"Invalidated by Scenario v{new_version} update ({note}) - previously {prev_st}", tid, event_id))
+                row = conn.execute("SELECT id FROM tasks WHERE id = ? AND event_id = ?;", (tid, event_id)).fetchone()
+                if row:
+                    all_task_ids_to_invalidate.add(tid)
 
-        # Flag affected vendor commitments for reconfirmation if headcount shifted
-        if new_guests != evt["guest_count"]:
+        # Persist affected tasks as needing review (including completed tasks whose preconditions shifted)
+        for tid in all_task_ids_to_invalidate:
+            t_row = conn.execute("SELECT status FROM tasks WHERE id = ? AND event_id = ?;", (tid, event_id)).fetchone()
+            prev_st = t_row["status"] if t_row else "UNKNOWN"
+            conn.execute("""
+                UPDATE tasks SET status = 'NEEDS_REVIEW', reverification_reason = ? WHERE id = ? AND event_id = ?;
+            """, (f"Invalidated by Scenario v{new_version} update ({note}) - previously {prev_st}", tid, event_id))
+
+        # Flag affected vendor commitments for reconfirmation if planning parameters shifted
+        if changed_params:
             conn.execute("""
                 UPDATE vendor_commitments SET needs_reconfirmation = 1 WHERE event_id = ?;
             """, (event_id,))
@@ -766,7 +820,7 @@ def commit_scenario_version(
         cur = conn.execute("""
             UPDATE events SET guest_count = ?, setting = ?, active_scenario_version = ? 
             WHERE id = ? AND active_scenario_version = ?;
-        """, (new_guests, setting, new_version, event_id, old_version))
+        """, (new_guests, chosen_setting, new_version, event_id, old_version))
         if cur.rowcount == 0:
             raise ValueError(f"Stale proposal rejected: Base version v{old_version} was modified concurrently.")
 
@@ -792,6 +846,7 @@ def revert_scenario_version(
     """
     Safely reverts an event by creating a new forward version from target_version items.
     Never deletes or alters payment records or historical audit logs.
+    Accurately restores and snapshots event_date and setting.
     """
     target_path = db_path or get_db_path()
     now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -809,17 +864,20 @@ def revert_scenario_version(
         new_version = old_version + 1
         new_sc_id = f"sc-{event_id}-v{new_version}"
 
+        target_date = target_sc["event_date"] if ("event_date" in target_sc.keys() and target_sc["event_date"]) else evt["event_date"]
+        target_setting = (target_sc["setting"] or evt["setting"]).lower()
+
         # Fetch items from target scenario
         target_items = conn.execute("SELECT * FROM budget_items WHERE scenario_id = ?;", (target_sc["id"],)).fetchall()
 
         # Archive currently active scenario
         conn.execute("UPDATE scenarios SET status = 'ARCHIVED' WHERE event_id = ? AND status = 'ACTIVE';", (event_id,))
 
-        # Insert new active scenario representing the reverted state
+        # Insert new active scenario representing the reverted state WITH event_date snapshotted
         conn.execute("""
-            INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?);
-        """, (new_sc_id, event_id, new_version, f"Revert to v{target_version}: {reason}", target_sc["guest_count"], target_sc["target_budget_paise"], target_sc["setting"], now_str))
+            INSERT INTO scenarios (id, event_id, version, name, guest_count, target_budget_paise, setting, event_date, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?);
+        """, (new_sc_id, event_id, new_version, f"Revert to v{target_version}: {reason}", target_sc["guest_count"], target_sc["target_budget_paise"], target_setting, target_date, now_str))
 
         # Re-insert items without copying stale historical paid balances
         # Actual cash allocations are computed dynamically from the immutable payments ledger
@@ -845,8 +903,8 @@ def revert_scenario_version(
             ))
 
         conn.execute("""
-            UPDATE events SET guest_count = ?, setting = ?, active_scenario_version = ? WHERE id = ?;
-        """, (target_sc["guest_count"], target_sc["setting"], new_version, event_id))
+            UPDATE events SET guest_count = ?, setting = ?, event_date = ?, active_scenario_version = ? WHERE id = ?;
+        """, (target_sc["guest_count"], target_setting, target_date, new_version, event_id))
 
         conn.execute("""
             INSERT INTO audit_logs (event_id, timestamp, action_type, description, previous_value, new_value)
@@ -864,21 +922,52 @@ def record_payment(
     reference_note: str,
     commitment_id: Optional[str] = None,
     budget_item_id: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Records an actual payment transaction in the ledger, updating commitment and item paid balances."""
+    """Records an actual payment transaction in the ledger, with strict idempotency and conflict protection."""
     if amount_paise <= 0:
         raise ValueError(f"Payment amount must be strictly positive, got {amount_paise}")
 
     target_path = db_path or get_db_path()
     now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    payment_id = f"pay-{uuid.uuid4().hex[:10]}"
+
+    clean_ref = reference_note.strip()
+    key = idempotency_key.strip() if idempotency_key else f"pay-op-{uuid.uuid4().hex[:16]}"
 
     with get_connection(target_path) as conn:
         # Cross-event tenant validation
         evt = conn.execute("SELECT id FROM events WHERE id = ?;", (event_id,)).fetchone()
         if not evt:
             raise ValueError(f"Event {event_id} not found")
+
+        # Idempotency check: if key already exists, verify payload match or raise conflict
+        if idempotency_key:
+            existing = conn.execute(
+                "SELECT * FROM payments WHERE event_id = ? AND idempotency_key = ?;",
+                (event_id, key)
+            ).fetchone()
+            if existing:
+                same_amount = existing["amount_paise"] == amount_paise
+                same_method = existing["payment_method"] == payment_method
+                same_budget = (existing["budget_item_id"] or "") == (budget_item_id or "")
+                same_comm = (existing["commitment_id"] or "") == (commitment_id or "")
+                if same_amount and same_method and same_budget and same_comm:
+                    return {
+                        "success": True,
+                        "payment_id": existing["id"],
+                        "amount_paise": existing["amount_paise"],
+                        "already_recorded": True,
+                        "message": "Payment already recorded with this reference (idempotent duplicate)."
+                    }
+                else:
+                    raise ValueError(
+                        f"Idempotency conflict: Key '{key}' was already used for a payment of "
+                        f"₹{existing['amount_paise']/100:,.2f} ({existing['payment_method']}). "
+                        f"Cannot reuse key for different payload."
+                    )
+
+        payment_id = f"pay-{uuid.uuid4().hex[:10]}"
 
         if commitment_id:
             comm = conn.execute("SELECT id FROM vendor_commitments WHERE id = ? AND event_id = ?;", (commitment_id, event_id)).fetchone()
@@ -895,9 +984,9 @@ def record_payment(
                 raise ValueError(f"Budget item '{budget_item_id}' not found for event '{event_id}'")
 
         conn.execute("""
-            INSERT INTO payments (id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, paid_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-        """, (payment_id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, now_str))
+            INSERT INTO payments (id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, idempotency_key, paid_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, (payment_id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, key, now_str))
 
         if commitment_id:
             conn.execute("""
@@ -915,7 +1004,46 @@ def record_payment(
         """, (event_id, now_str, "RECORD_PAYMENT", f"Recorded payment of ₹{amount_paise/100:,.2f} via {payment_method} ({reference_note})", None, f"Payment {payment_id}"))
 
         conn.commit()
-        return {"success": True, "payment_id": payment_id, "amount_paise": amount_paise}
+        return {"success": True, "payment_id": payment_id, "amount_paise": amount_paise, "already_recorded": False}
+
+        payment_id = f"pay-{uuid.uuid4().hex[:10]}"
+
+        if commitment_id:
+            comm = conn.execute("SELECT id FROM vendor_commitments WHERE id = ? AND event_id = ?;", (commitment_id, event_id)).fetchone()
+            if not comm:
+                raise ValueError(f"Commitment '{commitment_id}' not found for event '{event_id}'")
+
+        if budget_item_id:
+            b_item = conn.execute("""
+                SELECT b.id FROM budget_items b 
+                JOIN scenarios s ON b.scenario_id = s.id 
+                WHERE b.id = ? AND s.event_id = ?;
+            """, (budget_item_id, event_id)).fetchone()
+            if not b_item:
+                raise ValueError(f"Budget item '{budget_item_id}' not found for event '{event_id}'")
+
+        conn.execute("""
+            INSERT INTO payments (id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, idempotency_key, paid_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, (payment_id, event_id, commitment_id, budget_item_id, amount_paise, payment_method, reference_note, key, now_str))
+
+        if commitment_id:
+            conn.execute("""
+                UPDATE vendor_commitments SET paid_amount_paise = paid_amount_paise + ? WHERE id = ? AND event_id = ?;
+            """, (amount_paise, commitment_id, event_id))
+
+        if budget_item_id:
+            conn.execute("""
+                UPDATE budget_items SET paid_amount_paise = paid_amount_paise + ? WHERE id = ?;
+            """, (amount_paise, budget_item_id))
+
+        conn.execute("""
+            INSERT INTO audit_logs (event_id, timestamp, action_type, description, previous_value, new_value)
+            VALUES (?, ?, ?, ?, ?, ?);
+        """, (event_id, now_str, "RECORD_PAYMENT", f"Recorded payment of ₹{amount_paise/100:,.2f} via {payment_method} ({reference_note})", None, f"Payment {payment_id}"))
+
+        conn.commit()
+        return {"success": True, "payment_id": payment_id, "amount_paise": amount_paise, "already_recorded": False}
 
 
 def approve_vendor_quote_in_db(
@@ -957,14 +1085,27 @@ def approve_vendor_quote_in_db(
         total_quote_paise = 0
         new_item_ids = []
 
-        # Mark superseded estimated items to eliminate double-counting
+        # Validate that unconfirmed zero prices cannot be approved without price input
+        for it in items:
+            unit = max(0, int(it.get("unit_cost_paise", 0)))
+            notes_str = str(it.get("notes") or "")
+            if unit == 0 and ("PRICE_UNCONFIRMED" in notes_str or "unconfirmed" in notes_str.lower()):
+                raise ValueError("Cannot approve quote with unconfirmed zero price. Please provide confirmed rate before committing.")
+
+        # Mark superseded estimated items to eliminate double-counting with strict tenant isolation
         if supersedes_item_ids:
             for s_id in supersedes_item_ids:
-                conn.execute("UPDATE budget_items SET approval_state = 'REPLACED' WHERE id = ?;", (s_id,))
+                row = conn.execute("SELECT id FROM budget_items WHERE id = ? AND scenario_id = ?;", (s_id, scenario_id)).fetchone()
+                if not row:
+                    raise ValueError(f"Cross-event violation: Item '{s_id}' does not belong to active scenario of event '{event_id}'")
+                conn.execute("UPDATE budget_items SET approval_state = 'REPLACED' WHERE id = ? AND scenario_id = ?;", (s_id, scenario_id))
         elif supersedes_item_id:
-            conn.execute("UPDATE budget_items SET approval_state = 'REPLACED' WHERE id = ?;", (supersedes_item_id,))
+            row = conn.execute("SELECT id FROM budget_items WHERE id = ? AND scenario_id = ?;", (supersedes_item_id, scenario_id)).fetchone()
+            if not row:
+                raise ValueError(f"Cross-event violation: Item '{supersedes_item_id}' does not belong to active scenario of event '{event_id}'")
+            conn.execute("UPDATE budget_items SET approval_state = 'REPLACED' WHERE id = ? AND scenario_id = ?;", (supersedes_item_id, scenario_id))
         else:
-            # Auto-supersede estimated items in the same category
+            # Auto-supersede estimated items in the same category within THIS scenario
             conn.execute("""
                 UPDATE budget_items SET approval_state = 'REPLACED'
                 WHERE scenario_id = ? AND category = ? AND approval_state = 'ESTIMATED';

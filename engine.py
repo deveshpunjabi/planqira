@@ -34,6 +34,7 @@ def compute_line_item_paise(
     guest_count: int,
     step_capacity: int = 1,
     tax_rate_bps: int = 0,
+    is_tax_inclusive: bool = False,
 ) -> Dict[str, int]:
     """
     Calculates exact integer paise for a line item without floating-point drift.
@@ -42,6 +43,12 @@ def compute_line_item_paise(
     - Unit cost must be non-negative (>= 0).
     - Step capacity must be strictly positive (>= 1) for tiered models.
     - Tax rate must be bounded between 0 and 10000 basis points.
+
+    When is_tax_inclusive is True:
+    - unit_cost_paise represents the gross unit price.
+    - total_paise = quantity * unit_cost_paise (guaranteed exact to the paise with zero drift).
+    - tax_paise is derived at the aggregation boundary: (total * bps + (10000+bps)//2) // (10000+bps).
+    - subtotal_paise = total_paise - tax_paise.
     """
     if int(guest_count) <= 0:
         raise ValueError(f"Guest count must be strictly positive (>= 1), got {guest_count}")
@@ -65,9 +72,14 @@ def compute_line_item_paise(
     else:
         raise ValueError(f"Unsupported pricing model: {pricing_model}. Must be FIXED, PER_CAPITA, or STEP_TIERED.")
 
-    subtotal_paise = quantity * unit_paise
-    tax_paise = calculate_tax_paise(subtotal_paise, tax_rate_bps)
-    total_paise = subtotal_paise + tax_paise
+    if is_tax_inclusive and tax_rate_bps > 0:
+        total_paise = quantity * unit_paise
+        tax_paise = (total_paise * tax_rate_bps + (10000 + tax_rate_bps) // 2) // (10000 + tax_rate_bps)
+        subtotal_paise = total_paise - tax_paise
+    else:
+        subtotal_paise = quantity * unit_paise
+        tax_paise = calculate_tax_paise(subtotal_paise, tax_rate_bps)
+        total_paise = subtotal_paise + tax_paise
 
     return {
         "quantity": quantity,
@@ -75,6 +87,7 @@ def compute_line_item_paise(
         "subtotal_paise": subtotal_paise,
         "tax_paise": tax_paise,
         "total_paise": total_paise,
+        "is_tax_inclusive": is_tax_inclusive,
     }
 
 
@@ -145,12 +158,14 @@ def evaluate_event_solvency(
     total_projected_paise = 0
 
     for item in line_items:
+        is_incl = bool(item.get("is_tax_inclusive", False) or ("tax-inclusive" in str(item.get("notes", "")).lower()))
         calc = compute_line_item_paise(
             pricing_model=item["pricing_model"],
             unit_cost_paise=item["unit_cost_paise"],
             guest_count=guest_count,
             step_capacity=item.get("step_capacity", 1),
             tax_rate_bps=item.get("tax_rate_bps", 0),
+            is_tax_inclusive=is_incl,
         )
 
         approval: ApprovalState = item.get("approval_state", "ESTIMATED")

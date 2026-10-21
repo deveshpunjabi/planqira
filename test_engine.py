@@ -40,9 +40,10 @@ from main import app
 
 @pytest.fixture(autouse=True)
 def isolate_test_database(tmp_path, monkeypatch):
-    """Guarantees every test runs against a fresh, isolated temporary database."""
+    """Guarantees every test runs against a fresh, isolated temporary database with deterministic offline fallback."""
     test_db_path = str(tmp_path / "isolated_test_planqira.db")
     monkeypatch.setenv("PLANQIRA_DB_PATH", test_db_path)
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     init_db(test_db_path)
     yield test_db_path
 
@@ -803,3 +804,302 @@ def test_dietary_and_style_personalization_in_create_event():
     assert len(tasting_tasks) > 0
     assert "Pure Veg & Jain" in tasting_tasks[0]["title"]
 
+
+
+# =====================================================================
+# 11. REMEDIATION & ROBUSTNESS TESTS (Planqira vs UtsavAI Parity)
+# =====================================================================
+
+def test_server_owned_scenario_computation_rejects_forged_costs(client):
+    """Verifies that client cannot forge budget line item costs when committing a scenario version."""
+    evts = client.get("/api/events").json()["events"]
+    evt_id = evts[0]["id"]
+    evt_data = client.get(f"/api/events/{evt_id}").json()
+
+    orig_items = evt_data["solvency"]["items"]
+    original_item_cost = orig_items[0]["unit_cost_paise"]
+    base_ver = evt_data["event"]["active_scenario_version"]
+
+    # Attempt to forge cost to 1 paise via client payload
+    forged_items = []
+    for it in orig_items:
+        forged_copy = dict(it)
+        forged_copy["unit_cost_paise"] = 1
+        forged_items.append(forged_copy)
+
+    payload = {
+        "new_guests": 220,
+        "base_version": base_ver,
+        "note": "Attacker trying to reduce costs to 1 rupee",
+        "new_budget_items": forged_items,
+    }
+
+    res = client.post(f"/api/events/{evt_id}/commit-scenario", json=payload)
+    assert res.status_code == 200
+
+    # Fetch updated event: Server must have calculated from authoritative database state,
+    # NOT from forged client items!
+    updated_evt = client.get(f"/api/events/{evt_id}").json()
+    new_items = updated_evt["solvency"]["items"]
+    # The first item cost must remain the authoritative cost, not 1 paise
+    assert new_items[0]["unit_cost_paise"] == original_item_cost
+    assert new_items[0]["unit_cost_paise"] > 1
+    # Total projected spend must reflect authoritative costs, not 1 paise
+    assert updated_evt["solvency"]["total_projected_paise"] > 1000000
+
+
+def test_cross_event_replacement_rejected():
+    """Verifies strict tenant isolation: Event A cannot supersede or alter items belonging to Event B."""
+    evt_a = create_event({
+        "title": "Event A Royal Wedding",
+        "event_type": "wedding",
+        "city": "Mumbai",
+        "event_date": "2026-11-10",
+        "guest_count": 100,
+        "target_budget_paise": 50000000,
+    })
+    evt_b = create_event({
+        "title": "Event B Corporate Gala",
+        "event_type": "corporate",
+        "city": "Bengaluru",
+        "event_date": "2026-11-20",
+        "guest_count": 100,
+        "target_budget_paise": 50000000,
+    })
+
+    full_b = get_event_by_id(evt_b["event_id"])
+    item_b_id = full_b["budget_items"][0]["id"]
+
+    # Attempt to approve a quote in Event A while passing an item ID from Event B
+    with pytest.raises(ValueError, match="Cross-event violation"):
+        approve_vendor_quote_in_db(
+            event_id=evt_a["event_id"],
+            vendor_name="Malicious Vendor",
+            category="Decor & Styling",
+            items=[{
+                "name": "Intrusive Decor",
+                "pricing_model": "FIXED",
+                "unit_cost_paise": 2000000,
+                "step_capacity": 1,
+                "tax_rate_bps": 1800,
+            }],
+            supersedes_item_ids=[item_b_id],
+        )
+
+
+def test_payment_idempotency_prevents_duplicate_charge(client):
+    """Verifies that submitting the same payment twice returns already_recorded and never double-counts cash."""
+    evts = client.get("/api/events").json()["events"]
+    evt_id = evts[0]["id"]
+
+    initial_evt = client.get(f"/api/events/{evt_id}").json()
+    initial_paid = initial_evt["solvency"]["total_paid_paise"]
+
+    payment_payload = {
+        "amount_paise": 1500000,
+        "payment_method": "UPI",
+        "reference_note": "UPI/TXN987654321/ADVANCE",
+        "idempotency_key": "test-idem-key-unique-001",
+    }
+
+    # First attempt: succeeds
+    res1 = client.post(f"/api/events/{evt_id}/record-payment", json=payment_payload)
+    assert res1.status_code == 200
+    assert res1.json()["already_recorded"] is False
+
+    # Second attempt with exact same key: returns already_recorded = True
+    res2 = client.post(f"/api/events/{evt_id}/record-payment", json=payment_payload)
+    assert res2.status_code == 200
+    assert res2.json()["already_recorded"] is True
+
+    # Total paid must have increased by exactly 1500000, NOT 3000000
+    after_evt = client.get(f"/api/events/{evt_id}").json()
+    assert after_evt["solvency"]["total_paid_paise"] == initial_paid + 1500000
+
+    # Conflicting payload with same key must return HTTP 409
+    conflicting_payload = dict(payment_payload)
+    conflicting_payload["amount_paise"] = 9999999
+    res_conflict = client.post(f"/api/events/{evt_id}/record-payment", json=conflicting_payload)
+    assert res_conflict.status_code == 409
+
+    # Two deliberately separate payments without explicit idempotency keys both succeed independently
+    res_sep1 = client.post(f"/api/events/{evt_id}/record-payment", json={
+        "amount_paise": 50000,
+        "payment_method": "Cash",
+        "reference_note": "Cash tip 1",
+    })
+    res_sep2 = client.post(f"/api/events/{evt_id}/record-payment", json={
+        "amount_paise": 50000,
+        "payment_method": "Cash",
+        "reference_note": "Cash tip 2",
+    })
+    assert res_sep1.status_code == 200 and res_sep1.json()["already_recorded"] is False
+    assert res_sep2.status_code == 200 and res_sep2.json()["already_recorded"] is False
+
+
+def test_quote_parser_advance_not_counted_as_line_item():
+    """Verifies that advance deposits are never parsed as purchasable line items."""
+    raw_text = "Decor & Mandap setup Rs 100000. Advance Rs 20000 due on booking."
+    parsed = parse_vendor_quote_text(raw_text, current_guest_count=150)
+    data = parsed["data"]
+
+    # Must extract deposit
+    assert data["advance_deposit_paise"] == 2000000
+
+    # Must have only 1 item (Decor), NOT an item for 'Advance'
+    item_names = [it["name"].lower() for it in data["extracted_items"]]
+    assert not any("advance" in name for name in item_names)
+    assert not any("deposit" in name for name in item_names)
+    assert len(data["extracted_items"]) == 1
+    assert data["extracted_items"][0]["unit_cost_paise"] == 10000000
+
+
+def test_quote_parser_negation_and_waivers_comprehensive():
+    """Verifies comprehensive negation and waiver rules for diesel, corkage, transport, and overtime."""
+    # 1. "No corkage fee"
+    p1 = parse_vendor_quote_text("Per person plate Rs 800. No corkage fee.", current_guest_count=100)
+    clauses1 = " ".join(p1["data"]["explicit_clauses_extracted"]).lower()
+    assert "corkage fee waived" in clauses1
+    assert "corkage fee required" not in clauses1
+
+    # 2. "Diesel included at no extra charge"
+    p2 = parse_vendor_quote_text("Sound truss setup Rs 50000. Diesel included at no extra charge.", current_guest_count=100)
+    clauses2 = " ".join(p2["data"]["explicit_clauses_extracted"]).lower()
+    assert "diesel explicitly included" in clauses2
+    assert "diesel charged separately" not in clauses2
+
+    # 3. "No surcharge for diesel"
+    p3 = parse_vendor_quote_text("DJ setup Rs 40000. No surcharge for diesel. Corkage fee required.", current_guest_count=100)
+    clauses3 = " ".join(p3["data"]["explicit_clauses_extracted"]).lower()
+    assert "diesel explicitly included" in clauses3
+    assert "corkage fee required" in clauses3
+
+    # 4. "Diesel not included. Outstation transport extra. Outside corkage fee waived."
+    p4 = parse_vendor_quote_text("Generator diesel not included. Outstation transport extra. Outside corkage fee waived.", current_guest_count=100)
+    clauses4 = " ".join(p4["data"]["explicit_clauses_extracted"]).lower()
+    assert "diesel charged separately as surcharge" in clauses4
+    assert "transport fees applicable" in clauses4
+    assert "corkage fee waived" in clauses4
+
+
+def test_quote_parser_tax_inclusive_exact_preservation_across_quantities():
+    """
+    Verifies that tax-inclusive quotes preserve exact gross totals across 1, 3, 100, and 500 guests.
+    Also verifies that percentage advance uses the authoritative gross total.
+    """
+    raw_text = "Catering Rs 850 per plate including 5% GST. 40% advance."
+    parsed = parse_vendor_quote_text(raw_text, current_guest_count=100)
+    data = parsed["data"]
+
+    assert len(data["extracted_items"]) == 1
+    item = data["extracted_items"][0]
+    assert item["tax_rate_bps"] == 500
+    assert item["unit_cost_paise"] == 85000  # Quoted gross unit rate
+    assert item["is_tax_inclusive"] is True
+
+    # 100 guests: Quoted gross total = 100 * 85000 = 8,500,000 paise (₹85,000)
+    # 40% advance must be exactly ₹34,000 (3,400,000 paise), NOT ₹32,380.80
+    assert data["advance_deposit_paise"] == 3400000
+
+    # Test exact gross preservation across multiple quantities
+    for q, expected_total in [(1, 85000), (3, 255000), (100, 8500000), (500, 42500000)]:
+        calc = compute_line_item_paise(
+            pricing_model="PER_CAPITA",
+            unit_cost_paise=item["unit_cost_paise"],
+            guest_count=q,
+            tax_rate_bps=item["tax_rate_bps"],
+            is_tax_inclusive=True,
+        )
+        assert calc["total_paise"] == expected_total, f"Failed for {q} guests: got {calc['total_paise']}, expected {expected_total}"
+        assert calc["subtotal_paise"] + calc["tax_paise"] == calc["total_paise"]
+
+
+def test_revert_scenario_restores_date_and_setting():
+    """Verifies that reverting a scenario restores historical date and setting, including restore-of-restore."""
+    created = create_event({
+        "title": "Date Revert Test Event",
+        "event_type": "anniversary",
+        "city": "Jaipur",
+        "event_date": "2026-11-01",
+        "setting": "outdoor",
+        "guest_count": 100,
+        "target_budget_paise": 50000000,
+    })
+    evt_id = created["event_id"]
+
+    # Commit v2: change date to 2026-12-25 and setting to indoor
+    commit_scenario_version(
+        event_id=evt_id,
+        new_guests=120,
+        new_setting="indoor",
+        note="Shift to Christmas Indoors",
+        new_date="2026-12-25",
+    )
+
+    evt_v2 = get_event_by_id(evt_id)
+    assert evt_v2["event"]["active_scenario_version"] == 2
+    assert evt_v2["event"]["event_date"] == "2026-12-25"
+    assert evt_v2["event"]["setting"] == "indoor"
+
+    # Revert to v1 (restore v1 as v3)
+    revert_scenario_version(
+        event_id=evt_id,
+        target_version=1,
+        reason="Weather cleared up, returning to November Outdoor blueprint",
+    )
+
+    evt_v3 = get_event_by_id(evt_id)
+    assert evt_v3["event"]["active_scenario_version"] == 3
+    # event_date and setting must match v1
+    assert evt_v3["event"]["event_date"] == "2026-11-01"
+    assert evt_v3["event"]["setting"] == "outdoor"
+
+    # Commit v4: shift date to 2027-02-15
+    commit_scenario_version(
+        event_id=evt_id,
+        new_guests=130,
+        new_setting="hybrid",
+        note="Shift to February",
+        new_date="2027-02-15",
+    )
+    evt_v4 = get_event_by_id(evt_id)
+    assert evt_v4["event"]["event_date"] == "2027-02-15"
+
+    # Restore v3 (which was itself a restored revision!)
+    revert_scenario_version(
+        event_id=evt_id,
+        target_version=3,
+        reason="Restore the restored revision v3",
+    )
+    evt_v5 = get_event_by_id(evt_id)
+    assert evt_v5["event"]["active_scenario_version"] == 5
+    # Must restore 2026-11-01, NOT retain 2027-02-15!
+    assert evt_v5["event"]["event_date"] == "2026-11-01"
+    assert evt_v5["event"]["setting"] == "outdoor"
+
+
+def test_unconfirmed_zero_price_quote_approval_blocked():
+    """Verifies that an unconfirmed zero-price quote cannot be approved without rate confirmation."""
+    raw_text = "Photography package price to be confirmed upon venue visit."
+    parsed = parse_vendor_quote_text(raw_text, current_guest_count=100)
+    data = parsed["data"]
+
+    assert data["extracted_items"][0]["unit_cost_paise"] == 0
+    assert "PRICE_UNCONFIRMED" in str(data["extracted_items"][0].get("notes"))
+
+    evt = create_event({
+        "title": "Photo Test Event",
+        "event_type": "birthday",
+        "city": "Delhi",
+        "event_date": "2026-11-15",
+        "guest_count": 80,
+        "target_budget_paise": 30000000,
+    })
+
+    with pytest.raises(ValueError, match="Cannot approve quote with unconfirmed zero price"):
+        approve_vendor_quote_in_db(
+            event_id=evt["event_id"],
+            vendor_name="Shutterbug Studios",
+            category="Photography",
+            items=data["extracted_items"],
+        )

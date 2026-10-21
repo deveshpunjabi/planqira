@@ -134,6 +134,7 @@ class RecordPaymentRequest(BaseModel):
     reference_note: str = Field(..., min_length=2, max_length=200)
     commitment_id: Optional[str] = None
     budget_item_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
 
 
 class CreateIncidentRequest(BaseModel):
@@ -267,10 +268,10 @@ def simulate_scenario(event_id: str, req: SimulateRequest):
 @app.post("/api/events/{event_id}/commit-scenario")
 def commit_scenario(event_id: str, req: CommitScenarioRequest):
     try:
+        # Server-owned authoritative scenario calculation (P0 fix: prevent client cost forgery)
         result = commit_scenario_version(
             event_id=event_id,
             new_guests=req.new_guests,
-            new_budget_items=req.new_budget_items,
             note=req.note,
             base_version=req.base_version,
             new_setting=req.new_setting,
@@ -295,6 +296,8 @@ def revert_scenario(event_id: str, req: RevertScenarioRequest):
         )
         return result
     except ValueError as e:
+        if "Idempotency conflict" in str(e):
+            raise HTTPException(status_code=409, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -326,6 +329,8 @@ def approve_quote(event_id: str, req: ApproveQuoteRequest):
         )
         return result
     except ValueError as e:
+        if "Idempotency conflict" in str(e):
+            raise HTTPException(status_code=409, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -339,9 +344,12 @@ def post_record_payment(event_id: str, req: RecordPaymentRequest):
             reference_note=req.reference_note,
             commitment_id=req.commitment_id,
             budget_item_id=req.budget_item_id,
+            idempotency_key=req.idempotency_key,
         )
         return result
     except ValueError as e:
+        if "Idempotency conflict" in str(e):
+            raise HTTPException(status_code=409, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -362,6 +370,8 @@ def post_incident(event_id: str, req: CreateIncidentRequest):
         )
         return result
     except ValueError as e:
+        if "Idempotency conflict" in str(e):
+            raise HTTPException(status_code=409, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
 

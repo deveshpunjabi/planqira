@@ -112,15 +112,25 @@ async function loadEvents() {
       switchTab(requestedTab);
     }
 
+    const requestedSetting = urlParams.get("setting");
+
     if (requestedGuests && currentEventData) {
       const slider = document.getElementById("simHeadcountSlider");
       if (slider) {
         slider.value = requestedGuests;
         onHeadcountSliderChange(requestedGuests);
-        if (requestedTab === "tabScenario") {
-          runScenarioSimulation();
-        }
       }
+    }
+
+    if (requestedSetting && currentEventData) {
+      const settingSelect = document.getElementById("simSettingSelect");
+      if (settingSelect) {
+        settingSelect.value = requestedSetting;
+      }
+    }
+
+    if ((requestedGuests || requestedSetting) && requestedTab === "tabScenario") {
+      runScenarioSimulation();
     }
   } catch (e) {
     showLoadError(e.message);

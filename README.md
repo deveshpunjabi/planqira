@@ -58,9 +58,22 @@ python -m playwright install chromium
 python -m pytest test_engine.py test_e2e_playwright.py
 ```
 
-The latest local review passed **29 backend tests and 11 browser checks (40 total)**. Browser tests start their own loopback server and use a temporary database; no manually running server is needed. They cover navigation, refresh, error recovery, loading/empty states, quote review, payment persistence, scenario previews, dialog focus, exports, and layouts at 390/768/1440 pixels. See [TEST-REPORT.md](TEST-REPORT.md) for scope and limitations.
+The test suite passes **37 backend tests and 11 browser checks (48 total)**. Browser tests start their own loopback server and use a temporary database; no manually running server is needed. They cover navigation, refresh, error recovery, loading/empty states, quote review, payment persistence, scenario previews, dialog focus, exports, and layouts at 390/768/1440 pixels. See [TEST-REPORT.md](TEST-REPORT.md) for scope and limitations.
 
 For an existing compatible browser installation, tests accept `PLAYWRIGHT_EXECUTABLE_PATH`. Optional `PLANQIRA_SCREENSHOT_DIR` saves preview images outside the repository. GitHub Actions installs browser dependencies and runs both suites.
+
+## Verified Remediations
+
+- **Server-Owned Scenario Computation:** Scenario commits derive costs authoritatively from the database state. Client attempts to forge line item costs are rejected/ignored.
+- **Cross-Event Isolation:** Quote approvals strictly validate that superseded items belong to the active scenario of the target event. Cross-event tampering raises an error.
+- **Payment Idempotency & Conflict Guard:** Unique constraint `(event_id, idempotency_key)` protects payments. Retrying identical payloads returns the original transaction (`already_recorded: true`), while conflicting payloads under the same key return HTTP 409 Conflict. Separate payments without keys succeed independently.
+- **Quote Parser & Negation Semantics:**
+  - Advance deposits are extracted as payment obligations and never created as purchasable line items.
+  - Multi-clause negations accurately classify "Diesel not included", "Outstation transport extra", "No corkage fee", "Diesel included at no extra charge", and "No surcharge for diesel".
+  - Tax-inclusive pricing preserves exact gross totals across 1, 3, 100, and large guest headcounts with zero paise drift.
+  - Unconfirmed quotes (e.g. rate TBD / on request) are tagged `PRICE_UNCONFIRMED` and blocked from zero-rate commitment approval.
+- **Revision Revert & Snapshot Fidelity:** Reverting a scenario restores historical `event_date` and `setting`, snapshots `event_date` on new forward revisions, and supports repeated restore-of-restore.
+- **Server-Owned Dependency Invalidation:** Task review flags (`NEEDS_REVIEW`) and vendor reconfirmations are computed authoritatively on the server using `DependencyDAG` when guest count, setting, or date shift.
 
 ## Deployment and current limits
 
@@ -68,9 +81,7 @@ The repository includes a Vercel ASGI entry point and routing configuration. **V
 
 Other remaining release work:
 
-- Event-scoped object checks do not provide user authentication or private multi-tenant authorization.
-- Scenario commit still accepts client-provided item dictionaries; the server must own consequential financial calculations and invalidations.
-- Date restoration, full schedule/calendar semantics, and concurrency need additional end-to-end verification.
+- Event-scoped object checks do not provide multi-user authentication or session login.
 - Live provider/model compatibility was not verified in the isolated regression run.
 - Automated browser checks are not a full accessibility audit or production certification.
 

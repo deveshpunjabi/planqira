@@ -798,9 +798,9 @@
       li4.textContent = "DAG Dependency: Milestones 'Confirm Seating' and 'Table Florals' flagged for reverification";
       feed.appendChild(li4);
 
-      // Deep link button
+      // Deep link button with event, guests, and setting parameter parity
       const launchBtn = document.getElementById("demoLaunchBtn");
-      launchBtn.href = `/dashboard?event=${p.id}&guests=${guests}&tab=tabScenario`;
+      launchBtn.href = `/dashboard?event=${p.id}&guests=${guests}&setting=${setting}&tab=tabScenario`;
     }
 
     // Init on load
