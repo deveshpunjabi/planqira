@@ -1,3 +1,14 @@
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+planqira.db
+planqira.db-journal
+
 # dependencies
 /node_modules
 /.pnp

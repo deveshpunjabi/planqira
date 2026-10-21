@@ -1,142 +1,167 @@
-# UtsavAI — Celebration & Event Planner
-**Challenge 5: Celebration & Event Planner (PromptWars Virtual)**  
-*Next.js App Router • TypeScript • Google GenAI SDK • GitHub + Vercel Deployment*
+# Planqira — Autonomous Event Decision, Commitment & Operations Engine
+**PromptWars Virtual [Challenge 5] Celebration & Event Planner**  
+*“Every decision. Every detail. Under control.”*  
+*FastAPI • SQLite ACID Storage • Topological DAG • Integer-Paise Precision • Gemini 2.5 Flash*
 
 ---
 
-## 1. Product Overview
+## 1. Executive Summary & Philosophy
 
-**UtsavAI** turns celebration ideas into editable, budget-balanced event plans—and coordinates last-minute replanning when real life changes. Built for **Weddings**, **Birthdays**, and **Community Events**, UtsavAI unites creative aesthetics, deterministic accounting, compressed timelines, and contract protection into a single interactive command center.
+Most event planning applications fail under real-world pressure because they treat planning as a static AI text prompt. When real life hits—when 50 extra guests RSVP, vendor quotes carry hidden diesel surcharges, or budgets get slashed—toy generators break, produce floating-point rounding errors, or silently scale numbers down to fake affordability.
 
-### Core Differentiator: Plan Rescue
-When budgets shrink, guest lists expand, or weather forces an outdoor celebration inside, **Plan Rescue** coordinates updates across all four planning pillars, analyzes tradeoffs, and presents a structured Before/After proposal with review gates and full Undo capability.
+**Planqira** is an **Event Decision, Commitment & Operations Engine**. It replaces toy text cards with deterministic financial math, true Directed Acyclic Graph (DAG) dependency tracking, ACID relational persistence, and structured AI contract intelligence.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            PLANQIRA SYSTEM TOPOLOGY                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+          ┌─────────────────────────────────────────────────────────┐
+          │      PRECISION OPERATIONS STUDIO (HTML5 / Vanilla JS)   │
+          │   Sticky Solvency HUD • 4 Workspaces • Zero CDN Drift   │
+          └────────────────────────────┬────────────────────────────┘
+                                       │ REST / JSON (Strict Pydantic)
+                                       ▼
+          ┌─────────────────────────────────────────────────────────┐
+          │              FASTAPI OPERATIONAL CONTROL PLANE          │
+          │  Simulation • Quote Ingestion • Exporters (.CSV / .ICS) │
+          └───────────┬─────────────────────────────┬───────────────┘
+                      │                             │
+                      ▼                             ▼
+┌───────────────────────────────┐     ┌─────────────────────────────────┐
+│   DETERMINISTIC SOLVER & DAG  │     │      GEMINI 2.5 FLASH COGNITIVE │
+│  • Integer-Paise Accounting   │     │  • WhatsApp Quote Parsing       │
+│  • Half-Up Tax Rounding       │     │  • Hidden Fee Clause Extraction │
+│  • Kahn's Cycle Detection     │     │  • Counter-Negotiation Scripts  │
+│  • BFS Parameter Invalidation │     │  • Disclosed Heuristic Fallback │
+└──────────────┬────────────────┘     └─────────────────────────────────┘
+               │
+               ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│              SQLITE ACID RELATIONAL STORAGE (planqira.db)             │
+│   Foreign Keys • Immutable Scenario Versions • Audit Ledger Logs      │
+│   (Dialect-compatible with Supabase PostgreSQL for Cloud Scaling)     │
+└───────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 2. The Four Mandatory Planning Pillars
+## 2. Core Architectural Breakthroughs
 
-| Pillar | Features | Engineering Guarantee |
+### 1. Integer-Paise Financial Math & Solvency Deficit State
+- **Zero Floating-Point Drift:** All money is computed and stored as integer paise (`₹1.00 = 100 paise`). Standard IEEE-754 floating-point drift is eliminated.
+- **Half-Up Tax Rounding:** GST basis points (1800 bps = 18.00%) use standard half-up rounding:
+  $$\text{Tax Paise} = \lfloor(\text{Subtotal Paise} \times \text{BPS} + 5000) / 10000\rfloor$$
+- **Granular Line-Item Pricing Models:**
+  - `FIXED`: 1 unit regardless of guest headcount (e.g., Venue rental, DJ truss).
+  - `PER_CAPITA`: 1 unit per guest (e.g., Royal Rajasthani dinner buffet, guest favors).
+  - `STEP_TIERED`: $\lceil \text{Guests} / \text{Capacity} \rceil$ units (e.g., 1 banqueting table per 8 guests, 1 buffet station per 75 guests).
+- **Zero Affordability Faking:** If total required spend (Projected spend + 10% contingency) exceeds target budget, the engine returns an explicit `DEFICIT` state with negative variance rather than forcibly compressing line items.
+
+### 2. Directed Acyclic Graph (DAG) Invalidation
+- **Directed Graph Model:** Operational tasks and vendor commitments are represented in a directed graph.
+- **Kahn's Algorithm:** Verifies the operational graph is strictly acyclic.
+- **Cascade Parameter Invalidation:** When a core parameter changes (such as guest count shifting from 250 to 320), Planqira executes a Breadth-First Search (BFS) to identify and flag all downstream tasks (e.g., seating cluster layout, meal prep count, catering confirmation) for re-verification.
+
+### 3. Separation of Approval States from Payment Ledger
+Planqira strictly separates contractual commitment from cash flow:
+- **Approval State:** `ESTIMATED` $\rightarrow$ `QUOTED` $\rightarrow$ `APPROVED` (or `REJECTED`). Only non-rejected items count towards projected commitments.
+- **Payment Status:** `UNPAID` $\rightarrow$ `PARTIAL` $\rightarrow$ `PAID`, computed from real ledger advances paid against contract totals.
+
+### 4. Relational Persistence & Immutable Scenario Versioning
+- **ACID Relational Storage:** Backed by SQLite (`planqira.db`) with `PRAGMA foreign_keys = ON;`.
+- **Immutable Scenario Snapshots:** Adjusting an event scenario does not overwrite history; it archives previous scenarios, increments `active_scenario_version`, inserts versioned items, and appends an immutable record to `audit_logs`.
+- **Production Readiness:** Schema is structured for clean transition to Supabase PostgreSQL by swapping the DB connection URL.
+
+### 5. Gemini 2.5 Flash Quoting & Transparent Fallback
+- **Structured Pydantic Extraction:** Ingests raw, unstructured vendor messages (e.g., messy WhatsApp texts) into typed items, tax rates, advance requirements, and hidden fee flags.
+- **Disclosed Heuristic Fallback:** When running offline without credentials, the engine operates in transparent heuristic mode with `is_simulated: True` clearly labeled.
+
+---
+
+## 3. Four Dedicated Operational Workspaces
+
+| Workspace | Purpose | Key Capabilities |
 |---|---|---|
-| **1. Personalized Themes** | 3 bespoke concepts per brief, visual 4-hex palettes, decor/menu directions, sensory atmosphere hooks (lighting, scent, music), 15-min signature moments, and low-cost DIY swaps. | Theme selection persists locally; colors verified against 6-hex format (`#RRGGBB`). |
-| **2. Deterministic Budget** | Strict 12% Emergency Contingency Buffer card, 6 categorical allocations summing exactly to 88%, integer minor currency units (`INR ₹`, `USD $`, `EUR €`), locked costs, line item details, and an interactive What-If recalculator. | $\text{Reserve} = \text{round}(\text{total} \times 12 / 100)$; $\sum \text{Categories} + \text{Reserve} = \text{Total}$ exactly down to 1 minor unit. Deficits are detected and blocked. |
-| **3. Date-Aware Timeline** | Macro countdown milestones adapting to lead time (>45 days vs. compressed 3-day rapid schedules), dynamic Planning Readiness Metric %, and chronological Day-Of Run-of-Show splitting Front-of-House (guest view) and Back-of-House (crew actions). | Date math respects local event timezone. Milestones prior to today are flagged overdue. Tasks compressed for short-notice celebrations. |
-| **4. Vendor Interrogation Kit** | Essential vendor cards (Venue, Catering, Decor, Audio/DJ, Photography, Logistics), recommended booking windows, contract checklists, sharp "Hidden Fee Trap Questions", and 1-click WhatsApp/email negotiation scripts. | Hidden-fee traps expose corkage, diesel, and clean-up surcharges. Negotiation scripts copy to clipboard with toast notification. |
+| **01. Mission Control** | Strategic Oversight | Executive metadata, spend breakdown across Approval states, 3 sensory creative concepts with hex color swatches & DIY swaps, live append-only audit trail. |
+| **02. Scenario Lab** | Decision Impact Engine | Headcount slider (50–600 guests), side-by-side before/after line item diffs, formula flags (`FIXED`, `PER_CAPITA`, `STEP_TIERED`), DAG invalidation cascade warnings, 1-click commit to Scenario vNext. |
+| **03. Commitments Hub** | Vendor Negotiations | Vendor table with approval & payment badges, direct WhatsApp outreach links (`wa.me/?text=...`), hidden fee trap questions, and the AI Vendor Quote Extractor modal with 1-click sample quotes. |
+| **04. Live Operations** | Execution & Contingencies | T-Minus countdown checklist with headcount sensitivity flags, minute-by-minute day-of runbook with Front/Back-of-House split, rapid contingency switchboard (rain, generator, medical), and verified file exporters. |
 
 ---
 
-## 3. Plan Rescue & Scenario Mutations
+## 4. Verified Native File Exports
 
-When unforeseen real-world shifts occur, Plan Rescue executes coordinated adjustments:
-1. **⚡ Squeeze Budget by 15%**: $\text{New Total} = \text{round}(\text{Current Total} \times 0.85)$. Rebalances unlocked categories while strictly preserving confirmed/locked vendor agreements.
-2. **📈 Scale Guest Headcount +25%**: $\text{New Guests} = \lceil \text{Current Guests} \times 1.25 \rceil$. Maintains fixed total budget, recalculating per-guest allocations and shifting catering strategy from plated dining to efficient buffet stations.
-3. **🌧️ Rain & Shelter Pivot**: Switches open-air lawns to verified indoor halls or canopy structures, shielding sound electronics and adjusting day-of run-of-show.
-4. **✏️ Custom Bounded Directive**: User-specified targeted replan instruction.
-
-### Feasibility & Review Gates
-- **Deficit Protection**: If locked costs exceed available allocatable funds, the proposal is flagged **Infeasible** and the Apply button is disabled.
-- **Stale Proposal Rejection**: Proposal embeds `baseRevision`. If local browser edits occurred in the interim, the proposal is rejected as stale.
-- **Undo Engine**: Restores previous accepted plan content with a fresh, monotonically increasing revision number.
+- **Financial Ledger (.CSV):** Conforms strictly to RFC-4180 with metadata headers, item formulas, quantities, tax rates, approval states, and payment statuses.
+- **Calendar Schedule (.ICS):** Conforms strictly to RFC-5545 (`VCALENDAR` / `VEVENT`) with UTC timestamps, timeframes, and descriptions for native import into Apple Calendar, Google Calendar, and Microsoft Outlook.
+- **Executive Print Layout:** Dedicated `@media print` stylesheet that cleanly formats the event plan for print or Save as PDF.
 
 ---
 
-## 4. Architecture & Technical Stack
+## 5. Verification & Test Suite
 
-```
-Browser (Next.js 15 App Router + React 19 + Tailwind CSS)
-   │
-   ├── Credential-Free Sample Mode (3 Rich Deterministic Blueprints, 0ms latency)
-   │
-   └── Live AI Route (/api/plan & /api/replan)
-         │
-         ├── Zod Schema Validation & Input Boundary Checks
-         ├── Official @google/genai SDK (gemini-2.5-flash or GEMINI_MODEL)
-         ├── Server-Side GEMINI_API_KEY (Never leaked to client)
-         ├── Deterministic Budget Engine (Largest-remainder integer math)
-         └── Date Engine (Timezone-aware lead time compression)
+Planqira includes a comprehensive `pytest` suite testing all financial calculations, rounding edge cases, graph invalidations, and API endpoints:
+
+```bash
+# Run complete test suite
+python -m pytest test_engine.py -v
 ```
 
-- **Hosting**: Vercel Git Integration (No Cloud Run, Vertex AI, or GCP server required).
-- **Persistence**: Guarded `localStorage` with quota protection and schema versioning (`schemaVersion: 1`).
-- **Data Portability**: Full JSON Blueprint Export and Import with validation; browser-native Print / Save as PDF with dedicated print stylesheet.
+### Passing Test Matrix (18/18 Passing):
+1. `test_calculate_tax_paise_exact_half_up_rounding` — Exact half-up rounding at boundaries
+2. `test_compute_line_item_paise_fixed` — Fixed pricing independence from guest shifts
+3. `test_compute_line_item_paise_per_capita` — Exact per-guest unit calculation
+4. `test_compute_line_item_paise_step_tiered` — Math.ceil step capacity threshold jumps
+5. `test_evaluate_event_solvency_and_approval_separation` — Approval pipeline vs payment ledger
+6. `test_evaluate_event_solvency_deficit_detection` — Deficit detection without false scaling
+7. `test_dag_cycle_detection` — Kahn's algorithm cycle verification
+8. `test_dag_parameter_invalidation_propagation` — BFS cascade invalidation
+9. `test_simulate_scenario_impact` — Decision impact comparison math
+10. `test_database_idempotent_init_and_seeding` — Seeding all 3 demo events
+11. `test_scenario_versioning_and_audit_logging` — Immutable scenario snapshot commits
+12. `test_quote_parsing_fallback` — Disclosed heuristic quote parsing
+13. `test_api_health` — Health check & persistence reporting
+14. `test_api_list_and_get_events` — Event retrieval & solvency evaluation
+15. `test_api_simulate_scenario` — Headcount simulation endpoint
+16. `test_api_quote_parsing_and_approval` — Quote parsing and approval ledger commit
+17. `test_api_csv_export` — RFC-4180 CSV export endpoint
+18. `test_api_ics_export` — RFC-5545 ICS calendar export endpoint
 
 ---
 
-## 5. Environment Variables & Setup
+## 6. Getting Started
 
-Create a `.env.local` file (modeled on `.env.example`):
+### Prerequisites
+- Python 3.12+
+- `pip`
 
+### Installation
+```bash
+# Clone the repository
+git clone <repo-url>
+cd "Challenge 5 - Celebration & Event Planner"
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### Environment Configuration (Optional)
+Copy `.env.example` to `.env`:
 ```dotenv
 # Server-side Gemini API key (Google AI Studio)
 GEMINI_API_KEY=your_actual_api_key_here
-
-# Model name supporting structured JSON
-GEMINI_MODEL=gemini-2.5-flash
-
-# Set to true only after configuring key
-AI_ENABLED=false
 ```
+*Note: If no API key is provided, Planqira automatically operates in transparent credential-free heuristic mode with simulated tags clearly disclosed.*
 
-### Local Development Commands:
+### Running the Application
 ```bash
-# Install dependencies
-npm ci
-
-# Run test suite (30 unit & domain tests)
-npm test
-
-# Run TypeScript type check
-npm run typecheck
-
-# Run ESLint
-npm run lint
-
-# Run production build
-npm run build
-
-# Start production server
-npm start
+# Start FastAPI application
+python -m uvicorn main:app --host 127.0.0.1 --port 8080 --reload
 ```
+Open **[http://127.0.0.1:8080](http://127.0.0.1:8080)** in any browser.
 
----
-
-## 6. Vercel Deployment Instructions
-
-1. Push this repository to GitHub:
-   ```bash
-   git init
-   git add .
-   git commit -m "feat: UtsavAI Celebration & Event Planner initial release"
-   git remote add origin https://github.com/<your-username>/<your-repo>.git
-   git push -u origin main
-   ```
-2. In Vercel, click **Add New → Project**, import your GitHub repository.
-3. Keep standard Next.js framework settings.
-4. Add environment variables in Vercel Project Settings:
-   - `GEMINI_API_KEY` (Server-only secret)
-   - `GEMINI_MODEL`: `gemini-2.5-flash`
-   - `AI_ENABLED`: `true` (or `false` for sample mode evaluation)
-5. Click **Deploy**.
-
----
-
-## 7. Three-Minute Judging Demo Script
-
-- **0:00 – 0:25 (Pitch & The Problem)**:  
-  *“Event planning is fractured: budgets drift, timelines slip, and sudden changes break everything. UtsavAI is an intelligent Celebration Command Center that turns an event brief into an editable, budget-balanced plan across 4 pillars—and rescues it when real life changes.”*
-- **0:25 – 1:00 (The 4 Pillars & Deterministic Budget)**:  
-  Open the pre-loaded **Royal Heritage Wedding** sample (`Sample Plan • stored in this browser`). Show the 3 curated themes with visual hex swatches, the **Locked 12% Contingency Buffer Card**, and the 6-category ledger. Demonstrate that category totals plus reserve equal the total budget exactly.
-- **1:00 – 1:35 (Dual Timeline & Vendor Interrogation)**:  
-  Switch to the **Timeline Tab**: toggle a task checkbox and watch the **Planning Readiness Metric %** update. Switch to **Day-Of Run-of-Show** to show Front-of-House guest choreography versus Back-of-House crew actions. Open the **Vendors Tab**: point out the **Hidden-Fee Trap Question** and click **Copy Script** for instant WhatsApp outreach.
-- **1:35 – 2:20 (Plan Rescue in Action)**:  
-  Click **Launch Plan Rescue** → select **⚡ Squeeze Budget by 15%**. Highlight the Before/After diff: show that the locked venue cost remains protected while unlocked categories rebalance cleanly. Click **Apply Changes** (bumps revision to Rev #2). Click **Undo** to restore the previous state with a linear revision history.
-- **2:20 – 3:00 (Export, Print & Integrity)**:  
-  Trigger **Print Plan** to display the multi-page clean print layout. Click **Export JSON** to show browser-local backup. Conclude with architecture highlights: server-side Gemini 2.5 Flash, zero credential exposure, and ultra-lightweight source (< 1 MB).
-
----
-
-## 8. Limitations & Boundary Disclaimers
-
-- **Credential-Free Sample Mode**: The initial pre-loaded blueprints operate entirely in the client without requiring an API key. Live AI requires `AI_ENABLED=true` and a valid server-side `GEMINI_API_KEY`.
-- **Planning Estimates**: Displayed currency figures are planning benchmarks based on standard allocations, not guaranteed binding quotes from external vendors.
-- **No Direct Vendor Booking**: UtsavAI generates copyable negotiation drafts; it does not book vendors or process financial payments.
-- **Repository Size**: Total uncompressed source code is **611 KB** (Zip archive: **166 KB**), well within the 10 MB event target.
+### Docker Deployment
+```bash
+docker build -t planqira .
+docker run -p 8080:8080 planqira
+```
+Open **[http://localhost:8080](http://localhost:8080)**.

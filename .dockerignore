@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.git
+.github
+node_modules
+.next
+utsav-ai-source.zip
+planqira.db
+planqira.db-journal
+tests
