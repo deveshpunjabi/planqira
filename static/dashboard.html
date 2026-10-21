@@ -9,33 +9,34 @@
 </head>
 <body>
 
-  <!-- Top App Navigation -->
+  <!-- Top App Navigation (Structured 58px Command Header) -->
   <header class="app-header">
     <div class="brand-section">
-      <a href="/" class="btn btn-sm" style="text-decoration: none; margin-right: 0.5rem;" title="Return to Public Homepage">← Overview</a>
-      <a href="/" style="text-decoration: none; color: inherit;"><span class="brand-name">Planqira</span></a>
-      <span class="brand-tagline">Every decision. Every detail. Under control.</span>
+      <a href="/" class="btn btn-sm btn-subtle" title="Return to Public Homepage">← Overview</a>
+      <a href="/" class="brand-link">
+        <span class="brand-name">Planqira</span>
+        <span class="brand-badge">CONTROL PLANE</span>
+      </a>
+    </div>
+
+    <div class="header-center">
+      <div class="event-picker-box">
+        <span class="event-picker-icon">🎉</span>
+        <select id="eventSelector" class="select-input event-select-dropdown" onchange="switchEvent(this.value)">
+          <option value="">Loading celebrations...</option>
+        </select>
+      </div>
     </div>
 
     <div class="header-controls">
-      <select id="eventSelector" class="select-input" onchange="switchEvent(this.value)">
-        <option value="">Loading celebrations...</option>
-      </select>
-
       <span id="connectionPill" class="status-badge badge-neutral">Connecting...</span>
 
       <button class="btn btn-primary" onclick="openCreateEventModal()">
         + Create Event
       </button>
 
-      <button class="btn" onclick="exportFile('csv')" title="Download CSV ledger">
-        CSV Ledger
-      </button>
-      <button class="btn" onclick="exportFile('ics')" title="Export ICS calendar">
-        ICS Calendar
-      </button>
-      <button class="btn" onclick="window.print()" title="Print complete plan">
-        Print
+      <button class="btn btn-outline" onclick="window.print()" title="Print complete plan">
+        🖨️ Print
       </button>
     </div>
   </header>
@@ -43,41 +44,63 @@
   <!-- Two-Column Persistent Layout -->
   <div class="dashboard-layout">
     
-    <!-- Persistent Left Sidebar Navigation (235px wide) -->
+    <!-- Persistent Left Sidebar Navigation (240px wide) -->
     <aside class="dashboard-sidebar">
-      <div class="sidebar-nav-group">
-        <div class="sidebar-nav-title">Workspaces</div>
-        <button id="navBtnOverview" class="sidebar-btn active" onclick="switchTab('tabOverview')">
-          <span class="sidebar-btn-icon">📊</span> 01. Overview
-        </button>
-        <button id="navBtnIdeas" class="sidebar-btn" onclick="switchTab('tabIdeas')">
-          <span class="sidebar-btn-icon">💡</span> 02. Creative Ideas
-        </button>
-        <button id="navBtnBudget" class="sidebar-btn" onclick="switchTab('tabBudget')">
-          <span class="sidebar-btn-icon">💰</span> 03. Budget & Vendors
-        </button>
-        <button id="navBtnTimeline" class="sidebar-btn" onclick="switchTab('tabTimeline')">
-          <span class="sidebar-btn-icon">⏱️</span> 04. Timeline & Tasks
-        </button>
-        <button id="navBtnEventDay" class="sidebar-btn" onclick="switchTab('tabEventDay')">
-          <span class="sidebar-btn-icon">🎪</span> 05. Event Day
-        </button>
-        <button id="navBtnScenario" class="sidebar-btn" onclick="switchTab('tabScenario')">
-          <span class="sidebar-btn-icon">🔬</span> 06. Scenario Lab
-        </button>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Workspaces</div>
+        <nav class="sidebar-nav">
+          <button id="navBtnOverview" class="sidebar-btn active" onclick="switchTab('tabOverview')">
+            <span class="sidebar-btn-icon">📊</span>
+            <span class="sidebar-btn-text">01. Overview</span>
+          </button>
+          <button id="navBtnIdeas" class="sidebar-btn" onclick="switchTab('tabIdeas')">
+            <span class="sidebar-btn-icon">💡</span>
+            <span class="sidebar-btn-text">02. Creative Ideas</span>
+          </button>
+          <button id="navBtnBudget" class="sidebar-btn" onclick="switchTab('tabBudget')">
+            <span class="sidebar-btn-icon">💰</span>
+            <span class="sidebar-btn-text">03. Budget & Vendors</span>
+          </button>
+          <button id="navBtnTimeline" class="sidebar-btn" onclick="switchTab('tabTimeline')">
+            <span class="sidebar-btn-icon">⏱️</span>
+            <span class="sidebar-btn-text">04. Timeline & Tasks</span>
+          </button>
+          <button id="navBtnEventDay" class="sidebar-btn" onclick="switchTab('tabEventDay')">
+            <span class="sidebar-btn-icon">🎪</span>
+            <span class="sidebar-btn-text">05. Event Day</span>
+          </button>
+          <button id="navBtnScenario" class="sidebar-btn" onclick="switchTab('tabScenario')">
+            <span class="sidebar-btn-icon">🔬</span>
+            <span class="sidebar-btn-text">06. Scenario Lab</span>
+          </button>
+        </nav>
       </div>
 
-      <div class="sidebar-bottom-actions">
-        <div class="sidebar-nav-title">Exports & Actions</div>
-        <button class="btn btn-sm" onclick="exportFile('csv')" title="Download CSV ledger">
-          📥 CSV Ledger
-        </button>
-        <button class="btn btn-sm" onclick="exportFile('ics')" title="Export ICS calendar">
-          📅 ICS Calendar
-        </button>
-        <button class="btn btn-sm" onclick="window.print()" title="Print complete plan">
-          🖨️ Print Summary
-        </button>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Quick Actions</div>
+        <div class="sidebar-action-list">
+          <button class="btn btn-sm btn-sidebar-action" onclick="openQuoteModal()">
+            <span class="btn-sidebar-icon">🤖</span> AI Quote Extractor
+          </button>
+          <button class="btn btn-sm btn-sidebar-action" onclick="openRecordPaymentModal()">
+            <span class="btn-sidebar-icon">💳</span> Record Payment
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-section sidebar-export-section">
+        <div class="sidebar-section-title">Data Exports</div>
+        <div class="sidebar-action-list">
+          <button class="btn btn-sm btn-sidebar-export" onclick="exportFile('csv')" title="Download CSV ledger">
+            <span class="btn-sidebar-icon">📥</span> CSV Ledger
+          </button>
+          <button class="btn btn-sm btn-sidebar-export" onclick="exportFile('ics')" title="Export ICS calendar">
+            <span class="btn-sidebar-icon">📅</span> ICS Calendar
+          </button>
+          <button class="btn btn-sm btn-sidebar-export" onclick="window.print()" title="Print complete plan">
+            <span class="btn-sidebar-icon">🖨️</span> Print Plan
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -87,69 +110,96 @@
       <!-- Event Header Strip -->
       <section class="event-header-strip">
         <div class="event-title-row">
-          <h1 class="event-main-title" id="headerEventTitle">Loading Celebration...</h1>
-          <div>
+          <div class="event-title-meta-group">
+            <div class="event-eyebrow">ACTIVE CELEBRATION MISSION</div>
+            <h1 class="event-main-title" id="headerEventTitle">Loading Celebration...</h1>
+          </div>
+          <div class="event-actions-row">
             <span id="metaVersionBadge" class="status-badge badge-neutral">Scenario v1</span>
-            <button class="btn btn-sm" style="margin-left: 0.5rem;" onclick="openRevertModal()">Revert Scenario</button>
+            <button class="btn btn-sm btn-outline" onclick="openRevertModal()">Revert Scenario</button>
           </div>
         </div>
         <div class="event-meta-line">
-          <span class="event-meta-item" id="metaTypeCity">-</span>
-          <span>•</span>
-          <span class="event-meta-item" id="metaDateTime">-</span>
-          <span>•</span>
-          <span class="event-meta-item" id="metaGuests">-</span>
+          <div class="meta-chip">
+            <span class="meta-chip-icon">📍</span>
+            <span id="metaTypeCity">-</span>
+          </div>
+          <div class="meta-chip">
+            <span class="meta-chip-icon">📅</span>
+            <span id="metaDateTime">-</span>
+          </div>
+          <div class="meta-chip">
+            <span class="meta-chip-icon">👥</span>
+            <span id="metaGuests">-</span>
+          </div>
         </div>
       </section>
 
-      <!-- Financial Aligned Summary Strip -->
+      <!-- Financial Aligned Summary Strip (Responsive 7-Card Structured KPI Deck) -->
       <section class="financial-strip">
-        <div class="fin-metric">
-          <span class="fin-label">Target Budget</span>
-          <span class="fin-value" id="finBudget">₹0</span>
-          <span class="fin-sub">Allocated funds</span>
+        <div class="fin-metric-card">
+          <div class="fin-card-top">
+            <span class="fin-label">Target Budget</span>
+            <span class="fin-icon">🎯</span>
+          </div>
+          <div class="fin-value" id="finBudget">₹0</div>
+          <div class="fin-sub">Allocated ceiling</div>
         </div>
-        <div class="fin-divider"></div>
 
-        <div class="fin-metric">
-          <span class="fin-label">10% Contingency Reserve</span>
-          <span class="fin-value" id="finReserve">₹0</span>
-          <span class="fin-sub">Emergency buffer</span>
+        <div class="fin-metric-card">
+          <div class="fin-card-top">
+            <span class="fin-label">10% Contingency</span>
+            <span class="fin-icon">🛡️</span>
+          </div>
+          <div class="fin-value" id="finReserve">₹0</div>
+          <div class="fin-sub">Emergency ringfence</div>
         </div>
-        <div class="fin-divider"></div>
 
-        <div class="fin-metric">
-          <span class="fin-label">Projected Spend</span>
-          <span class="fin-value" id="finProjected">₹0</span>
-          <span class="fin-sub">Active line items</span>
+        <div class="fin-metric-card">
+          <div class="fin-card-top">
+            <span class="fin-label">Projected Spend</span>
+            <span class="fin-icon">📊</span>
+          </div>
+          <div class="fin-value" id="finProjected">₹0</div>
+          <div class="fin-sub">Active line items</div>
         </div>
-        <div class="fin-divider"></div>
 
-        <div class="fin-metric">
-          <span class="fin-label">Approved Contracts</span>
-          <span class="fin-value" id="finCommitted" style="color: var(--status-green);">₹0</span>
-          <span class="fin-sub">Locked commitments</span>
+        <div class="fin-metric-card">
+          <div class="fin-card-top">
+            <span class="fin-label">Approved Contracts</span>
+            <span class="fin-icon">📝</span>
+          </div>
+          <div class="fin-value" id="finCommitted" style="color: var(--status-green);">₹0</div>
+          <div class="fin-sub">Locked commitments</div>
         </div>
-        <div class="fin-divider"></div>
 
-        <div class="fin-metric">
-          <span class="fin-label">Actual Cash Paid</span>
-          <span class="fin-value" id="finPaid" style="color: var(--status-green);">₹0</span>
-          <span class="fin-sub">Settled advances</span>
+        <div class="fin-metric-card">
+          <div class="fin-card-top">
+            <span class="fin-label">Cash Paid</span>
+            <span class="fin-icon">💳</span>
+          </div>
+          <div class="fin-value" id="finPaid" style="color: var(--status-green);">₹0</div>
+          <div class="fin-sub">Settled advances</div>
         </div>
-        <div class="fin-divider"></div>
 
-        <div class="fin-metric">
-          <span class="fin-label">Outstanding Payable</span>
-          <span class="fin-value" id="finOutstanding">₹0</span>
-          <span class="fin-sub">Pending settlement</span>
+        <div class="fin-metric-card">
+          <div class="fin-card-top">
+            <span class="fin-label">Outstanding Payable</span>
+            <span class="fin-icon">⏳</span>
+          </div>
+          <div class="fin-value" id="finOutstanding">₹0</div>
+          <div class="fin-sub">Pending settlement</div>
         </div>
-        <div class="fin-divider"></div>
 
-        <div class="fin-metric">
-          <span class="fin-label">Solvency Balance</span>
-          <span class="fin-value" id="finVariance">₹0</span>
-          <span id="finSolvencyStatus" class="status-badge badge-green" style="margin-top: 0.15rem; width: fit-content;">SOLVENT</span>
+        <div class="fin-metric-card fin-card-solvency">
+          <div class="fin-card-top">
+            <span class="fin-label">Solvency Balance</span>
+            <span class="fin-icon">⚖️</span>
+          </div>
+          <div class="fin-value" id="finVariance">₹0</div>
+          <div class="fin-status-container">
+            <span id="finSolvencyStatus" class="status-badge badge-green">SOLVENT</span>
+          </div>
         </div>
       </section>
 
@@ -489,26 +539,37 @@
       </div>
 
       <!-- Simulation Summary Stats -->
-      <div id="simSummarySection" class="financial-strip" style="display: none; background: #ffffff; border: 1px solid var(--border-subtle); border-radius: 4px; margin-bottom: 1.5rem;">
-        <div class="fin-metric">
-          <span class="fin-label">Projected Spend Delta</span>
-          <span class="fin-value" id="simSpendDelta">₹0</span>
-        </div>
-        <div class="fin-divider"></div>
-
-        <div class="fin-metric">
-          <span class="fin-label">Simulated Solvency</span>
-          <span id="simSolvencyBadge" class="status-badge badge-green" style="margin-top: 0.2rem; width: fit-content;">SOLVENT</span>
-        </div>
-        <div class="fin-divider"></div>
-
-        <div class="fin-metric" style="flex: 1;">
-          <span class="fin-label">Trade-off Statement</span>
-          <span id="simTradeoffsText" style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.4;">-</span>
+      <div id="simSummarySection" class="sim-summary-deck" style="display: none;">
+        <div class="fin-metric-card">
+          <div class="fin-card-top">
+            <span class="fin-label">Projected Spend Delta</span>
+            <span class="fin-icon">📈</span>
+          </div>
+          <div class="fin-value" id="simSpendDelta">₹0</div>
+          <div class="fin-sub">Net impact on total cost</div>
         </div>
 
-        <div style="display: flex; align-items: center;">
-          <button class="btn btn-primary" onclick="commitScenarioAction()">
+        <div class="fin-metric-card">
+          <div class="fin-card-top">
+            <span class="fin-label">Simulated Solvency</span>
+            <span class="fin-icon">⚖️</span>
+          </div>
+          <div class="fin-status-container" style="margin-top: 0.35rem;">
+            <span id="simSolvencyBadge" class="status-badge badge-green">SOLVENT</span>
+          </div>
+          <div class="fin-sub">Post-scenario health</div>
+        </div>
+
+        <div class="fin-metric-card sim-card-tradeoff">
+          <div class="fin-card-top">
+            <span class="fin-label">Trade-off Statement</span>
+            <span class="fin-icon">💡</span>
+          </div>
+          <div id="simTradeoffsText" class="sim-tradeoff-desc">-</div>
+        </div>
+
+        <div class="sim-commit-container">
+          <button class="btn btn-primary btn-commit-scenario" onclick="commitScenarioAction()">
             Commit as Scenario vNext
           </button>
         </div>
