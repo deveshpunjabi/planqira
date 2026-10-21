@@ -19,6 +19,8 @@
 9. [RFC Standards Compliance (CSV & ICS)](#9-rfc-standards-compliance-csv--ics)
 10. [REST API Specification](#10-rest-api-specification)
 11. [Automated Verification & Test Matrix](#11-automated-verification--test-matrix)
+12. [Environment Configuration Guide](#12-environment-configuration-guide)
+13. [Troubleshooting & FAQ](#13-troubleshooting--faq)
 
 ---
 
@@ -586,3 +588,40 @@ python -m pytest test_e2e_playwright.py -v
 | 35 | `test_accessibility_keyboard_modal_dismissal` | Playwright E2E | Escape key modal dismiss listener and focus retention |
 | 36 | `test_file_exports_csv_and_ics` | Playwright E2E | RFC-4180 CSV and RFC-5545 ICS download endpoints |
 | 37 | `test_light_editorial_theme_styling` | Playwright E2E | Strict Light Theme verification (zero dark mode, warm ivory palette) |
+
+---
+
+## 12. Environment Configuration Guide
+
+Planqira relies on a `.env` file at the root level for local development, or platform environment variables on Vercel, Supabase, and Google Cloud Run.
+
+| Variable | Description | Required | Default | Example |
+|---|---|---|---|---|
+| `PORT` | Local network binding port for Uvicorn | No | `8080` | `8080` |
+| `GEMINI_API_KEY` | Google AI Studio key for live Gemma 4 quote extraction | No | `None` *(offline fallback)* | `AIzaSy...` |
+| `AI_MODEL` | DeepMind model identifier for cognitive vendor parsing | No | `gemma-4-31b-it` | `gemma-4-31b-it` |
+| `DATABASE_URL` | PostgreSQL connection string (Supabase / Neon / Cloud SQL) | No | `None` *(SQLite fallback)* | `postgresql://user:pass@host:5432/db` |
+| `PLANQIRA_DB_PATH` | Explicit file path for SQLite database file | No | `planqira.db` *(or `/tmp/planqira.db` on Vercel)* | `/tmp/test.db` |
+| `VERCEL` | Automatically provided by Vercel serverless runtime | Auto | `None` | `1` |
+
+> 🔒 **Security Notice:** Never commit actual `.env` files with secret API keys to Git. Planqira ships with a clean `.env.example` template and shields credentials via `.gitignore`.
+
+---
+
+## 13. Troubleshooting & FAQ
+
+### Q1: Why does quote parsing work without a `GEMINI_API_KEY`?
+**A:** Planqira provides a deterministic, disclosed heuristic extraction fallback. If `GEMINI_API_KEY` is not present in the environment, the parser processes line items, taxes, percentage advances, and waived fee clauses via regex heuristic analyzers and tags the response with `"is_simulated": true`. Live AI extraction triggers automatically when an API key is supplied.
+
+### Q2: How does Planqira prevent read-only filesystem errors on Vercel?
+**A:** Vercel serverless containers mount the application directory (`/var/task`) as read-only. Planqira's `database.py` detects `VERCEL="1"` or `AWS_LAMBDA_FUNCTION_NAME` and automatically directs SQLite storage to `/tmp/planqira.db`, the designated writable scratch partition.
+
+### Q3: How do I resolve `Address already in use` (Port 8080) on Windows?
+**A:** If an existing Uvicorn process is holding port 8080, run:
+```powershell
+Get-NetTCPConnection -LocalPort 8080 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+### Q4: Does scenario reversion erase payment records?
+**A:** **No.** Reverting a scenario creates a **new forward revision** (e.g., restoring v1 from v2 creates v3). Settled payments in the `payments` table and audit log entries in `audit_logs` are immutable and strictly preserved.
+
