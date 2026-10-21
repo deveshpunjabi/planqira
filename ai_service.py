@@ -1,60 +1,80 @@
 """
-Planqira AI Cognitive Services
-Integrates with Gemini 2.5 Flash via google-genai SDK for:
-1. Event Blueprint & Personalized Creative Concept Generation
-2. Unstructured Vendor Quote Parsing (WhatsApp/Email -> Structured Line Items + GST)
-3. Deficit Cure & Counter-Negotiation Advisory
-Features a transparent offline heuristic fallback that explicitly discloses simulated state.
+Planqira AI Cognitive Services Adapter
+Integrates with Google DeepMind Gemma 4 (gemma-4-31b-it / gemma-4-26b-a4b-it) & Gemini 2.5 Flash
+via the official google-genai SDK with local Pydantic validation, bounded timeouts,
+and honest, transparent offline heuristic fallback.
 """
 
 import json
 import os
 import re
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-# Check if google-genai is available
+# Check if google-genai SDK is available
 try:
     from google import genai
     from google.genai import types
+    from google.genai.errors import APIError
     HAS_GENAI_LIB = True
 except ImportError:
     HAS_GENAI_LIB = False
+    APIError = Exception
 
 
-# Default to Google DeepMind's Gemma 4 (gemma-4-26b-a4b-it / gemma-4-31b-it) or Gemini model
-DEFAULT_MODEL = os.getenv("AI_MODEL", os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it"))
+# Configurable model identifier: defaults to Gemma 4 31B (gemma-4-31b-it)
+DEFAULT_MODEL = os.getenv("AI_MODEL", os.getenv("GEMINI_MODEL", "gemma-4-31b-it"))
 
 
 def get_active_model() -> str:
     """Returns the configured model identifier."""
-    return os.getenv("AI_MODEL", os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it"))
+    return os.getenv("AI_MODEL", os.getenv("GEMINI_MODEL", DEFAULT_MODEL))
 
 
 class ExtractedLineItem(BaseModel):
-    name: str
+    name: str = Field(..., max_length=120)
     pricing_model: str = Field(description="Must be 'FIXED', 'PER_CAPITA', or 'STEP_TIERED'")
-    unit_cost_paise: int
-    step_capacity: int = 1
-    tax_rate_bps: int = Field(0, description="1800 for 18% GST")
+    unit_cost_paise: int = Field(..., ge=0)
+    step_capacity: int = Field(1, ge=1)
+    tax_rate_bps: int = Field(0, ge=0, le=10000, description="Tax rate in basis points, e.g. 1800 for 18% GST")
+
+    @field_validator("pricing_model")
+    @classmethod
+    def validate_pricing_model(cls, v: str) -> str:
+        upper = v.upper().strip()
+        if upper not in ("FIXED", "PER_CAPITA", "STEP_TIERED"):
+            return "FIXED"
+        return upper
 
 
 class ParsedQuoteResult(BaseModel):
-    vendor_name: str
-    category: str
+    vendor_name: str = Field(..., max_length=120)
+    category: str = Field(..., max_length=60)
     extracted_items: List[ExtractedLineItem]
-    advance_deposit_paise: int
+    advance_deposit_paise: int = Field(0, ge=0)
     deposit_due_date: Optional[str] = None
-    flagged_clauses: List[str]
-    suggested_negotiation_reply: str
+    explicit_clauses_extracted: List[str] = Field(default_factory=list)
+    suggested_clarification_questions: List[str] = Field(default_factory=list)
+    suggested_negotiation_reply: str = Field("", max_length=1000)
 
 
 def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150) -> Dict[str, Any]:
     """
-    Parses messy vendor communication (WhatsApp message / email).
-    Uses Gemini 2.5 Flash structured output if key is configured,
-    otherwise runs transparent heuristic extraction disclosing simulated state.
+    Parses messy vendor communications into structured line items.
+    1. Enforces strict input bounds and sanitization.
+    2. Calls Gemma 4 via Google GenAI SDK if GEMINI_API_KEY is configured.
+    3. Validates output locally against ParsedQuoteResult schema.
+    4. Falls back gracefully and honestly to heuristic extraction when offline,
+       explicitly tagging 'extraction_mode': 'CREDENTIAL_FREE_HEURISTIC'.
     """
+    sanitized_text = raw_quote_text.strip()[:4000]
+    if len(sanitized_text) < 5:
+        return {
+            "success": False,
+            "error": "Quote text too short to extract line items.",
+            "extraction_mode": "REJECTED",
+        }
+
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     active_model = get_active_model()
 
@@ -62,123 +82,160 @@ def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150)
         try:
             client = genai.Client(api_key=api_key)
             system_prompt = (
-                "You are an expert event auditor. Parse this raw vendor message into structured line items. "
-                "Tag items as FIXED (setup fee, DJ, lighting), PER_CAPITA (food plate, favors), or STEP_TIERED. "
-                "Convert all rupee amounts to integer paise (1 Rupee = 100 Paise). "
-                "Extract GST % as basis points (e.g., 18% = 1800, 5% = 500). "
-                "Flag any surprise clauses like corkage, generator diesel, overtime penalties."
+                "You are an expert event auditor. Parse the raw vendor communication into structured line items. "
+                "CRITICAL RULES:\n"
+                "1. Extract ONLY facts present in the text. Do NOT hallucinate vendor names, costs, or unmentioned services.\n"
+                "2. Tag items as 'FIXED', 'PER_CAPITA' (per guest/person/plate), or 'STEP_TIERED' (e.g. per table/bus).\n"
+                "3. Convert all rupee currency amounts to integer paise (1 Rupee = 100 Paise).\n"
+                "4. Extract GST or tax % as basis points (e.g., 18% = 1800, 5% = 500).\n"
+                "5. Only list clauses explicitly mentioned (e.g. generator diesel, overtime, corkage) in explicit_clauses_extracted.\n"
+                "6. General protection questions belong in suggested_clarification_questions."
             )
+
+            prompt_content = f"Event Headcount Context: {current_guest_count} guests\nVendor Text:\n{sanitized_text}"
             response = client.models.generate_content(
                 model=active_model,
-                contents=f"Current Event Guests: {current_guest_count}\nVendor Message:\n{raw_quote_text}",
+                contents=prompt_content,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     response_mime_type="application/json",
                     response_schema=ParsedQuoteResult,
-                    temperature=0.2,
+                    temperature=0.1,
                 ),
             )
-            result = json.loads(response.text)
+
+            raw_json = json.loads(response.text)
+            validated = ParsedQuoteResult.model_validate(raw_json)
+
             return {
                 "success": True,
                 "is_simulated": False,
-                "model": active_model,
-                "data": result,
-                "review_status": "PENDING_REVIEW",
+                "extraction_mode": "LIVE_AI",
+                "model_used": active_model,
+                "source_quote_text": sanitized_text,
+                "review_status": "PENDING_HUMAN_REVIEW",
+                "data": validated.model_dump(),
             }
         except Exception as e:
-            # Fall back to heuristic parser gracefully
+            # Fall back honestly to heuristic parser
             pass
 
-    # Heuristic Parser (Discloses simulated offline status)
-    return heuristic_quote_parser(raw_quote_text, current_guest_count)
-
-
-def heuristic_quote_parser(raw_text: str, current_guest_count: int) -> Dict[str, Any]:
-    """Deterministic regex heuristic parser for offline demonstration."""
-    text_lower = raw_text.lower()
-
-    vendor_name = "Extracted Vendor Partner"
-    category = "General"
-    extracted_items = []
-    flagged_clauses = []
-    advance_paise = 0
-
-    if "cater" in text_lower or "plate" in text_lower or "pax" in text_lower or "food" in text_lower:
-        category = "Catering"
-        vendor_name = "Shahi Dastarkhwan Caterers"
-        # Search for per plate rate like 850 or 1200
-        plate_match = re.search(r"(?:rs\.?|₹|\b)?\s*(\d{3,4})\s*(?:per\s*plate|/plate|per\s*pax|/pax)", text_lower)
-        plate_rate = int(plate_match.group(1)) if plate_match else 850
-        extracted_items.append({
-            "name": f"Master Banquet Buffet ({plate_rate}/plate)",
-            "pricing_model": "PER_CAPITA",
-            "unit_cost_paise": plate_rate * 100,
-            "step_capacity": 1,
-            "tax_rate_bps": 500 if "5%" in text_lower else 1800,
-        })
-        if "stall" in text_lower or "counter" in text_lower or "chaat" in text_lower:
-            extracted_items.append({
-                "name": "Live Chaat & Dessert Counter Setup",
-                "pricing_model": "FIXED",
-                "unit_cost_paise": 1800000,
-                "step_capacity": 1,
-                "tax_rate_bps": 1800,
-            })
-        flagged_clauses.append("Kitchen fuel cylinders and ice bins are excluded from base quote.")
-        advance_paise = 2500000
-
-    elif "decor" in text_lower or "flower" in text_lower or "stage" in text_lower or "light" in text_lower:
-        category = "Decor"
-        vendor_name = "Vibrant Flora & Lighting Studio"
-        extracted_items.append({
-            "name": "Stage Backdrop & Overhead Ambient Truss",
-            "pricing_model": "FIXED",
-            "unit_cost_paise": 4500000,
-            "step_capacity": 1,
-            "tax_rate_bps": 1800,
-        })
-        flagged_clauses.append("Overtime teardown fee of ₹4,000/hour applies after 1:00 AM.")
-        advance_paise = 1500000
-
-    elif "sound" in text_lower or "dj" in text_lower or "mic" in text_lower or "music" in text_lower:
-        category = "Entertainment"
-        vendor_name = "Pulse AV & Sound Rigging"
-        extracted_items.append({
-            "name": "Line Array Sound System + Wireless Mics",
-            "pricing_model": "FIXED",
-            "unit_cost_paise": 2800000,
-            "step_capacity": 1,
-            "tax_rate_bps": 1800,
-        })
-        flagged_clauses.append("Municipal sound curfew strictly enforced at 10:00 PM.")
-        advance_paise = 1000000
-    else:
-        extracted_items.append({
-            "name": "Service Deliverable Base Package",
-            "pricing_model": "FIXED",
-            "unit_cost_paise": 2000000,
-            "step_capacity": 1,
-            "tax_rate_bps": 1800,
-        })
-
-    suggested_reply = (
-        f"Hi {vendor_name}, thanks for the quote. We are planning for {current_guest_count} guests. "
-        "Could you confirm if generator fuel and breakdown labor are bundled, and whether the 18% GST invoice can be issued upon final milestone completion?"
-    )
-
+    # Credential-Free Heuristic Extraction (Disclosed & Honest)
+    heuristic_data = _heuristic_quote_parser(sanitized_text, current_guest_count)
     return {
         "success": True,
         "is_simulated": True,
-        "notice": "Simulated Heuristic Extraction (Offline Demo Mode)",
-        "data": {
-            "vendor_name": vendor_name,
-            "category": category,
-            "extracted_items": extracted_items,
-            "advance_deposit_paise": advance_paise,
-            "deposit_due_date": "2026-11-05",
-            "flagged_clauses": flagged_clauses,
-            "suggested_negotiation_reply": suggested_reply,
-        },
-        "review_status": "PENDING_REVIEW",
+        "extraction_mode": "CREDENTIAL_FREE_HEURISTIC",
+        "model_used": f"{active_model} (Simulated Local Heuristic)",
+        "source_quote_text": sanitized_text,
+        "review_status": "PENDING_HUMAN_REVIEW",
+        "data": heuristic_data,
+    }
+
+
+def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
+    """
+    Deterministic regex-based heuristic extractor for offline verification and testing.
+    Never pretends to be live AI; extracts observable figures from text.
+    """
+    # Detect vendor name
+    vendor_match = re.search(r"(?:this is|from|regards,?|team)\s+([A-Z][A-Za-z0-9\s&]+?)(?:[.,\n]|\s+catering|\s+productions|\s+sound)", text, re.IGNORECASE)
+    vendor_name = vendor_match.group(1).strip() if vendor_match else "Vendor Partner (Extracted)"
+
+    # Detect category
+    category = "General Logistics"
+    low = text.lower()
+    if any(k in low for k in ["cater", "thali", "food", "buffet", "plate", "pax", "dal baati", "snack"]):
+        category = "Catering"
+    elif any(k in low for k in ["dj", "sound", "light", "truss", "music", "audio", "speaker"]):
+        category = "Entertainment"
+    elif any(k in low for k in ["decor", "mandap", "flower", "lantern", "stage", "draping"]):
+        category = "Decor & Styling"
+    elif any(k in low for k in ["venue", "hall", "lawn", "rooftop", "banquet"]):
+        category = "Venue & Space"
+    elif any(k in low for k in ["photo", "video", "cinema", "drone", "album"]):
+        category = "Photography"
+
+    # Detect tax rate
+    tax_bps = 0
+    tax_match = re.search(r"(\d+(?:\.\d+)?)\s*%\s*gst", low)
+    if tax_match:
+        tax_pct = float(tax_match.group(1))
+        tax_bps = int(round(tax_pct * 100))
+
+    # Detect per-person cost
+    per_person_match = re.search(r"(?:rs\.?|inr|₹)\s*(\d[\d,]*)\s*(?:per\s+(?:person|pax|guest|head|plate)|\/-\s*per)", low)
+    unit_cost_paise = 0
+    pricing_model = "FIXED"
+    item_name = f"{category} Package"
+
+    if per_person_match:
+        val_str = per_person_match.group(1).replace(",", "")
+        unit_cost_paise = int(val_str) * 100
+        pricing_model = "PER_CAPITA"
+        item_name = "Per-Plate Banquet Service"
+    else:
+        # Detect flat rupee amounts
+        amounts = re.findall(r"(?:rs\.?|inr|₹)\s*(\d[\d,]*)", low)
+        if amounts:
+            clean_amts = [int(a.replace(",", "")) for a in amounts if int(a.replace(",", "")) >= 1000]
+            if clean_amts:
+                unit_cost_paise = clean_amts[0] * 100
+
+    # Advance deposit detection
+    advance_paise = 0
+    adv_match = re.search(r"(?:advance|token|deposit)(?:\s+is|\s+of)?(?:\s+rs\.?|\s+inr|\s+₹)?\s*(\d[\d,]*)", low)
+    if adv_match:
+        advance_paise = int(adv_match.group(1).replace(",", "")) * 100
+
+    # Date detection
+    due_date = None
+    date_match = re.search(r"(?:by|before|due)\s+(\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+)", low)
+    if date_match:
+        due_date = date_match.group(1).strip()
+
+    # Flag real explicit clauses in text
+    clauses = []
+    if "diesel" in low or "fuel" in low:
+        clauses.append("Kitchen fuel and generator diesel charged separately as surcharge.")
+    if "overtime" in low or "curfew" in low or "per hour" in low:
+        clauses.append("Overtime hours beyond agreed time slot incur hourly penalty fees.")
+    if "transport" in low or "km" in low:
+        clauses.append("Outstation travel/transport fees applicable beyond city radius.")
+    if "corkage" in low or "liquor" in low:
+        clauses.append("Outside beverage corkage fee required.")
+
+    # Questions & negotiation reply
+    questions = [
+        f"Does the quoted total include full setup, breakdown, and disposal fees?",
+        f"Can you provide a line-item tax breakdown matching the quoted {tax_bps/100:.1f}% GST rate?",
+    ]
+    if category == "Catering":
+        questions.append("Are guest tasting sessions, ceramic crockery, and serving staff included?")
+
+    negotiation_script = (
+        f"Hi {vendor_name}, thank you for sending over the quote for {category}. "
+        f"We are evaluating options for {guests} guests. Before locking in the agreement, "
+        f"could you confirm if the {tax_bps/100:.1f}% GST and setup logistics are all-inclusive?"
+    )
+
+    items = [
+        ExtractedLineItem(
+            name=item_name,
+            pricing_model=pricing_model,
+            unit_cost_paise=unit_cost_paise,
+            step_capacity=1,
+            tax_rate_bps=tax_bps,
+        )
+    ]
+
+    return {
+        "vendor_name": vendor_name,
+        "category": category,
+        "extracted_items": [it.model_dump() for it in items],
+        "advance_deposit_paise": advance_paise,
+        "deposit_due_date": due_date,
+        "explicit_clauses_extracted": clauses,
+        "suggested_clarification_questions": questions,
+        "suggested_negotiation_reply": negotiation_script,
     }

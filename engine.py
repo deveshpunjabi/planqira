@@ -9,7 +9,7 @@ import math
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
 PricingModel = Literal["FIXED", "PER_CAPITA", "STEP_TIERED"]
-ApprovalState = Literal["ESTIMATED", "QUOTED", "APPROVED", "REJECTED"]
+ApprovalState = Literal["ESTIMATED", "QUOTED", "APPROVED", "REJECTED", "REPLACED"]
 PaymentStatus = Literal["UNPAID", "PARTIAL", "PAID"]
 
 
@@ -17,8 +17,13 @@ def calculate_tax_paise(subtotal_paise: int, tax_rate_bps: int) -> int:
     """
     Standard half-up financial integer rounding for tax in basis points.
     1800 bps = 18.00%. (subtotal * bps + 5000) // 10000 ensures exact rounding.
+    Rejects negative inputs.
     """
-    if subtotal_paise <= 0 or tax_rate_bps <= 0:
+    if tax_rate_bps < 0 or tax_rate_bps > 10000:
+        raise ValueError(f"Tax rate basis points must be between 0 and 10000 (0-100%), got {tax_rate_bps}")
+    if subtotal_paise < 0:
+        raise ValueError(f"Subtotal cannot be negative, got {subtotal_paise}")
+    if subtotal_paise == 0 or tax_rate_bps == 0:
         return 0
     return (subtotal_paise * tax_rate_bps + 5000) // 10000
 
@@ -32,22 +37,33 @@ def compute_line_item_paise(
 ) -> Dict[str, int]:
     """
     Calculates exact integer paise for a line item without floating-point drift.
-    - FIXED: 1 unit regardless of guest count
-    - PER_CAPITA: 1 unit per guest
-    - STEP_TIERED: math.ceil(guest_count / step_capacity) units
+    Strictly validates all inputs:
+    - Guest count must be strictly positive (>= 1).
+    - Unit cost must be non-negative (>= 0).
+    - Step capacity must be strictly positive (>= 1) for tiered models.
+    - Tax rate must be bounded between 0 and 10000 basis points.
     """
-    guests = max(1, int(guest_count))
-    unit_paise = max(0, int(unit_cost_paise))
+    if int(guest_count) <= 0:
+        raise ValueError(f"Guest count must be strictly positive (>= 1), got {guest_count}")
+    if int(unit_cost_paise) < 0:
+        raise ValueError(f"Unit cost cannot be negative, got {unit_cost_paise}")
+    if int(tax_rate_bps) < 0 or int(tax_rate_bps) > 10000:
+        raise ValueError(f"Tax rate basis points must be between 0 and 10000 (0-100%), got {tax_rate_bps}")
+
+    guests = int(guest_count)
+    unit_paise = int(unit_cost_paise)
 
     if pricing_model == "FIXED":
         quantity = 1
     elif pricing_model == "PER_CAPITA":
         quantity = guests
     elif pricing_model == "STEP_TIERED":
-        cap = max(1, int(step_capacity))
+        cap = int(step_capacity)
+        if cap <= 0:
+            raise ValueError(f"Step capacity must be strictly positive (>= 1), got {step_capacity}")
         quantity = math.ceil(guests / cap)
     else:
-        raise ValueError(f"Unsupported pricing model: {pricing_model}")
+        raise ValueError(f"Unsupported pricing model: {pricing_model}. Must be FIXED, PER_CAPITA, or STEP_TIERED.")
 
     subtotal_paise = quantity * unit_paise
     tax_paise = calculate_tax_paise(subtotal_paise, tax_rate_bps)
@@ -70,15 +86,25 @@ def evaluate_event_solvency(
 ) -> Dict[str, Any]:
     """
     Evaluates complete budget ledger in integer paise.
-    Separates Approval State (ESTIMATED/QUOTED/APPROVED/REJECTED) from Payment Tracking (PAID/UNPAID).
+    Strictly validates budget constraints.
+    Separates Approval State (ESTIMATED/QUOTED/APPROVED/REJECTED/REPLACED) from Payment Tracking (PAID/PARTIAL/UNPAID).
     Never scales down items to fake 100% affordability; reports exact SURPLUS or DEFICIT.
     """
-    contingency_paise = (target_budget_paise * max(0, contingency_bps) + 5000) // 10000
+    if target_budget_paise < 0:
+        raise ValueError(f"Target budget cannot be negative, got {target_budget_paise}")
+    if contingency_bps < 0 or contingency_bps > 10000:
+        raise ValueError(f"Contingency basis points must be between 0 and 10000, got {contingency_bps}")
+    if guest_count <= 0:
+        raise ValueError(f"Guest count must be strictly positive, got {guest_count}")
+
+    contingency_paise = (target_budget_paise * contingency_bps + 5000) // 10000
     allocatable_paise = max(0, target_budget_paise - contingency_paise)
 
-    by_approval = {"ESTIMATED": 0, "QUOTED": 0, "APPROVED": 0, "REJECTED": 0}
+    by_approval = {"ESTIMATED": 0, "QUOTED": 0, "APPROVED": 0, "REJECTED": 0, "REPLACED": 0}
     by_payment = {"UNPAID": 0, "PARTIAL": 0, "PAID": 0}
     total_paid_paise = 0
+    total_deposit_required_paise = 0
+    total_approved_commitments_paise = 0
 
     evaluated_items = []
     total_projected_paise = 0
@@ -96,9 +122,15 @@ def evaluate_event_solvency(
         if approval in by_approval:
             by_approval[approval] += calc["total_paise"]
 
-        # Only non-rejected items count towards projected spend
-        if approval != "REJECTED":
+        # Only non-rejected and non-replaced items count towards projected spend
+        if approval not in ("REJECTED", "REPLACED"):
             total_projected_paise += calc["total_paise"]
+
+        if approval == "APPROVED":
+            total_approved_commitments_paise += calc["total_paise"]
+
+        deposit_req = item.get("deposit_required_paise", 0)
+        total_deposit_required_paise += deposit_req
 
         # Payment ledger tracking
         paid = item.get("paid_amount_paise", 0)
@@ -123,14 +155,20 @@ def evaluate_event_solvency(
     total_required_paise = contingency_paise + total_projected_paise
     variance_paise = target_budget_paise - total_required_paise
     solvency_status = "SOLVENT" if variance_paise >= 0 else "DEFICIT"
+    total_outstanding_paise = max(0, total_projected_paise - total_paid_paise)
+    remaining_budget_paise = max(0, variance_paise)
 
     return {
         "target_budget_paise": target_budget_paise,
         "contingency_paise": contingency_paise,
         "allocatable_paise": allocatable_paise,
         "total_projected_paise": total_projected_paise,
+        "total_approved_commitments_paise": total_approved_commitments_paise,
+        "total_deposit_required_paise": total_deposit_required_paise,
         "total_required_paise": total_required_paise,
         "total_paid_paise": total_paid_paise,
+        "total_outstanding_paise": total_outstanding_paise,
+        "remaining_budget_paise": remaining_budget_paise,
         "variance_paise": variance_paise,
         "solvency_status": solvency_status,
         "breakdown_by_approval_paise": by_approval,
@@ -244,12 +282,17 @@ def simulate_scenario_impact(
     contingency_bps: int,
     line_items: List[Dict[str, Any]],
     dag: Optional[DependencyDAG] = None,
+    baseline_date: Optional[str] = None,
+    new_date: Optional[str] = None,
+    baseline_setting: Optional[str] = None,
+    new_setting: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Runs side-by-side Decision Impact comparison:
     1. Evaluates baseline vs. simulated solvency.
     2. Isolates exact paise delta for FIXED vs. PER_CAPITA vs. STEP_TIERED items.
-    3. Runs DAG propagation to surface all downstream invalidations.
+    3. Runs DAG propagation across guests, date, and setting shifts.
+    4. Produces concrete tradeoff statements without fabricated claims.
     """
     base_eval = evaluate_event_solvency(target_budget_paise, contingency_bps, line_items, baseline_guests)
     sim_eval = evaluate_event_solvency(target_budget_paise, contingency_bps, line_items, new_guests)
@@ -273,13 +316,39 @@ def simulate_scenario_impact(
             "approval_state": base_it.get("approval_state", "ESTIMATED"),
         })
 
+    changed_params = []
+    if new_guests != baseline_guests:
+        changed_params.append("guests")
+    if new_date and baseline_date and new_date != baseline_date:
+        changed_params.append("date")
+    if new_setting and baseline_setting and new_setting != baseline_setting:
+        changed_params.append("setting")
+
     dag_impacts = []
-    if dag and new_guests != baseline_guests:
-        dag_impacts = dag.propagate_invalidation(["guests"])
+    if dag and changed_params:
+        dag_impacts = dag.propagate_invalidation(changed_params)
+
+    # Concrete tradeoffs
+    tradeoffs = []
+    if new_guests > baseline_guests:
+        tradeoffs.append(f"Guest expansion (+{new_guests - baseline_guests} guests) increases variable catering and tiered seating by ₹{cost_delta_paise/100:,.2f}.")
+    elif new_guests < baseline_guests:
+        tradeoffs.append(f"Guest reduction (-{baseline_guests - new_guests} guests) saves ₹{abs(cost_delta_paise)/100:,.2f} in per-capita catering while retaining fixed venue and production contracts.")
+
+    if new_setting and baseline_setting and new_setting != baseline_setting:
+        tradeoffs.append(f"Setting shift from {baseline_setting} to {new_setting} invalidates outdoor weather contingencies and requires venue floorplan reconfirmation.")
+
+    if new_date and baseline_date and new_date != baseline_date:
+        tradeoffs.append(f"Date shift from {baseline_date} to {new_date} requires reconfirming all vendor booking windows and calendar runbook cues.")
 
     return {
         "baseline_guests": baseline_guests,
         "new_guests": new_guests,
+        "baseline_date": baseline_date,
+        "new_date": new_date,
+        "baseline_setting": baseline_setting,
+        "new_setting": new_setting,
+        "changed_params": changed_params,
         "baseline_projected_paise": base_eval["total_projected_paise"],
         "simulated_projected_paise": sim_eval["total_projected_paise"],
         "cost_delta_paise": cost_delta_paise,
@@ -288,6 +357,8 @@ def simulate_scenario_impact(
         "baseline_variance_paise": base_eval["variance_paise"],
         "simulated_variance_paise": sim_eval["variance_paise"],
         "contingency_paise": sim_eval["contingency_paise"],
+        "remaining_budget_paise": sim_eval["remaining_budget_paise"],
         "item_diffs": item_diffs,
         "dag_impacts": dag_impacts,
+        "tradeoffs": tradeoffs,
     }

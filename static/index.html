@@ -3,1164 +3,808 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Planqira — Event Decision & Operations Platform</title>
-  <style>
-    :root {
-      --bg: #0b0f19;
-      --surface: #111827;
-      --surface-card: #1f2937;
-      --surface-border: #374151;
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
-      --emerald: #10b981;
-      --emerald-bg: rgba(16, 185, 129, 0.12);
-      --amber: #f59e0b;
-      --amber-bg: rgba(245, 158, 11, 0.12);
-      --rose: #ef4444;
-      --rose-bg: rgba(239, 68, 68, 0.12);
-      --indigo: #6366f1;
-      --indigo-bg: rgba(99, 102, 241, 0.12);
-      --text-main: #f9fafb;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-    body { background-color: var(--bg); color: var(--text-main); min-height: 100vh; display: flex; flex-direction: column; }
-    
-    /* Top Navigation */
-    header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--surface-border);
-      padding: 0.85rem 1.5rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      position: sticky;
-      top: 0;
-      z-index: 50;
-    }
-    .brand-wrap { display: flex; align-items: center; gap: 0.75rem; }
-    .logo-badge {
-      background: linear-gradient(135deg, #3b82f6, #6366f1);
-      width: 32px; height: 32px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 800; font-size: 1.1rem; color: #fff;
-    }
-    .brand-title { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; }
-    .brand-tag { font-size: 0.75rem; color: var(--text-muted); }
-
-    .header-actions { display: flex; align-items: center; gap: 1rem; }
-    select.event-picker {
-      background: var(--surface-card);
-      color: var(--text-main);
-      border: 1px solid var(--surface-border);
-      padding: 0.45rem 0.85rem;
-      border-radius: 6px;
-      font-size: 0.875rem;
-      cursor: pointer;
-    }
-    .status-pill {
-      display: inline-flex; align-items: center; gap: 0.4rem;
-      padding: 0.3rem 0.65rem; border-radius: 9999px;
-      font-size: 0.75rem; font-weight: 600;
-    }
-    .pill-green { background: var(--emerald-bg); color: var(--emerald); border: 1px solid rgba(16,185,129,0.3); }
-    .pill-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
-    .btn {
-      background: var(--surface-card);
-      color: var(--text-main);
-      border: 1px solid var(--surface-border);
-      padding: 0.45rem 0.85rem;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      font-weight: 500;
-      cursor: pointer;
-      display: inline-flex; align-items: center; gap: 0.4rem;
-      transition: all 0.15s ease;
-    }
-    .btn:hover { background: #2d3748; border-color: #4b5563; }
-    .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
-    .btn-primary:hover { background: var(--primary-hover); }
-    .btn-success { background: #059669; border-color: #059669; color: #fff; }
-    .btn-success:hover { background: #047857; }
-
-    /* Sticky Solvency HUD */
-    .solvency-hud {
-      background: #0d1322;
-      border-bottom: 1px solid var(--surface-border);
-      padding: 0.75rem 1.5rem;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 1rem;
-    }
-    .hud-stat {
-      background: var(--surface);
-      border: 1px solid rgba(255,255,255,0.06);
-      padding: 0.65rem 0.85rem;
-      border-radius: 8px;
-    }
-    .hud-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; }
-    .hud-value { font-size: 1.15rem; font-weight: 700; }
-    .hud-sub { font-size: 0.72rem; color: var(--text-dim); }
-
-    /* Workspace Tabs */
-    .nav-tabs {
-      display: flex;
-      background: var(--surface);
-      border-bottom: 1px solid var(--surface-border);
-      padding: 0 1.5rem;
-      gap: 1.5rem;
-    }
-    .tab-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      font-size: 0.875rem;
-      font-weight: 600;
-      padding: 0.85rem 0;
-      cursor: pointer;
-      position: relative;
-      transition: color 0.15s ease;
-    }
-    .tab-btn:hover { color: var(--text-main); }
-    .tab-btn.active { color: var(--primary); }
-    .tab-btn.active::after {
-      content: '';
-      position: absolute;
-      bottom: -1px; left: 0; right: 0;
-      height: 2px;
-      background: var(--primary);
-      border-radius: 2px;
-    }
-
-    /* Main Container */
-    main { flex: 1; padding: 1.5rem; max-width: 1400px; margin: 0 auto; width: 100%; }
-    .workspace-pane { display: none; }
-    .workspace-pane.active { display: block; animation: fadeIn 0.2s ease; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-
-    /* Cards & Grids */
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--surface-border);
-      border-radius: 10px;
-      padding: 1.25rem;
-      margin-bottom: 1.25rem;
-    }
-    .card-title {
-      font-size: 1rem;
-      font-weight: 700;
-      margin-bottom: 0.85rem;
-      display: flex; justify-content: space-between; align-items: center;
-    }
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
-    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem; }
-
-    /* Table Styles */
-    table.data-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.85rem;
-      text-align: left;
-    }
-    table.data-table th {
-      background: var(--surface-card);
-      color: var(--text-muted);
-      font-weight: 600;
-      padding: 0.65rem 0.85rem;
-      border-bottom: 1px solid var(--surface-border);
-    }
-    table.data-table td {
-      padding: 0.65rem 0.85rem;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
-    }
-    table.data-table tr:hover { background: rgba(255,255,255,0.02); }
-
-    /* Badges */
-    .badge {
-      display: inline-block;
-      padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-      font-size: 0.72rem;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-    .badge-fixed { background: #374151; color: #9ca3af; }
-    .badge-percapita { background: #1e3a8a; color: #93c5fd; }
-    .badge-tiered { background: #4c1d95; color: #c4b5fd; }
-    .badge-approved { background: var(--emerald-bg); color: var(--emerald); }
-    .badge-quoted { background: var(--amber-bg); color: var(--amber); }
-    .badge-rejected { background: var(--rose-bg); color: var(--rose); }
-
-    /* Themes Palette Cards */
-    .theme-card {
-      background: var(--surface-card);
-      border: 1px solid var(--surface-border);
-      border-radius: 8px;
-      padding: 1rem;
-      display: flex; flex-direction: column; gap: 0.65rem;
-    }
-    .theme-card.selected { border-color: var(--emerald); box-shadow: 0 0 0 1px var(--emerald); }
-    .swatch-row { display: flex; gap: 0.4rem; height: 26px; border-radius: 4px; overflow: hidden; }
-    .swatch { flex: 1; height: 100%; }
-
-    /* Scenario Lab Controls */
-    .slider-box {
-      background: var(--surface-card);
-      border: 1px solid var(--surface-border);
-      border-radius: 8px;
-      padding: 1.25rem;
-      margin-bottom: 1.25rem;
-    }
-    .slider-controls { display: flex; align-items: center; gap: 1.5rem; margin-top: 0.75rem; }
-    input[type=range] { flex: 1; accent-color: var(--primary); cursor: pointer; }
-    .headcount-display { font-size: 1.75rem; font-weight: 800; color: var(--primary); min-width: 90px; text-align: center; }
-
-    /* Warning callout */
-    .callout-warning {
-      background: var(--amber-bg);
-      border-left: 4px solid var(--amber);
-      padding: 0.85rem 1rem;
-      border-radius: 0 6px 6px 0;
-      margin-bottom: 1rem;
-      font-size: 0.85rem;
-    }
-    .callout-deficit {
-      background: var(--rose-bg);
-      border-left: 4px solid var(--rose);
-      padding: 0.85rem 1rem;
-      border-radius: 0 6px 6px 0;
-      margin-bottom: 1rem;
-      font-size: 0.85rem;
-    }
-
-    /* Modal Overlay */
-    .modal-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.75);
-      backdrop-filter: blur(4px);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-      padding: 1.5rem;
-    }
-    .modal-overlay.open { display: flex; }
-    .modal-box {
-      background: var(--surface);
-      border: 1px solid var(--surface-border);
-      border-radius: 12px;
-      max-width: 750px;
-      width: 100%;
-      max-height: 90vh;
-      display: flex; flex-direction: column;
-      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5);
-    }
-    .modal-header { padding: 1.25rem; border-bottom: 1px solid var(--surface-border); display: flex; justify-content: space-between; align-items: center; }
-    .modal-body { padding: 1.25rem; overflow-y: auto; flex: 1; }
-    .modal-footer { padding: 1rem 1.25rem; border-top: 1px solid var(--surface-border); display: flex; justify-content: flex-end; gap: 0.75rem; }
-
-    textarea.text-input {
-      width: 100%;
-      background: var(--surface-card);
-      border: 1px solid var(--surface-border);
-      color: var(--text-main);
-      padding: 0.75rem;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      font-family: inherit;
-      resize: vertical;
-      min-height: 120px;
-    }
-
-    /* Print View */
-    @media print {
-      body { background: #fff !important; color: #000 !important; }
-      header, .nav-tabs, .slider-box, .btn, .modal-overlay, #btnCommit { display: none !important; }
-      .workspace-pane { display: block !important; margin-bottom: 2rem; }
-      .card { border: 1px solid #ccc !important; background: #fff !important; color: #000 !important; break-inside: avoid; }
-      .hud-stat { border: 1px solid #ccc !important; background: #fff !important; color: #000 !important; }
-      th { background: #eee !important; color: #000 !important; }
-      td { border-bottom: 1px solid #ddd !important; color: #000 !important; }
-    }
-  </style>
+  <title>Planqira — Every decision. Every detail. Under control.</title>
+  <meta name="description" content="Planqira is a deterministic celebration and event operations platform engineered with integer-paise financial math, Google Gemma 4 cognitive quote extraction, Kahn's DAG dependency cascades, and minute-by-minute day-of execution runbooks.">
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
 
-  <!-- Top Navigation -->
-  <header>
-    <div class="brand-wrap">
-      <div class="logo-badge">P</div>
-      <div>
-        <div class="brand-title">Planqira</div>
-        <div class="brand-tag">Autonomous Event Decision, Commitment & Operations Engine</div>
+  <!-- Top Public Navigation -->
+  <header class="site-header">
+    <div class="site-nav-container">
+      <a href="/" style="text-decoration: none; display: flex; align-items: baseline; gap: 0.75rem;">
+        <span class="brand-name" style="font-size: 1.45rem;">Planqira</span>
+        <span class="brand-tagline" style="display: none; @media(min-width: 768px){display: inline;}">Every decision. Every detail. Under control.</span>
+      </a>
+
+      <nav>
+        <ul class="nav-links">
+          <li><a href="#how-it-works" class="nav-link">Pillars</a></li>
+          <li><a href="#interactive-demo" class="nav-link">Interactive Demo</a></li>
+          <li><a href="#quote-intelligence" class="nav-link">AI Quote Extractor</a></li>
+          <li><a href="#event-types" class="nav-link">Event Profiles</a></li>
+          <li><a href="#philosophy" class="nav-link">Philosophy</a></li>
+          <li><a href="#faqs" class="nav-link">FAQs</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="/dashboard?event=evt-royal-heritage-wedding" class="btn" title="Explore Jaipur Wedding">
+          Explore Demo
+        </a>
+        <a href="/dashboard" class="btn btn-primary" title="Open Planqira Operational Dashboard">
+          Launch Dashboard →
+        </a>
       </div>
-    </div>
-    <div class="header-actions">
-      <select id="eventSelector" class="event-picker" onchange="switchEvent(this.value)">
-        <option value="">Loading events...</option>
-      </select>
-        <div id="connectionPill" class="status-pill pill-green">
-          <span style="font-size: 0.6rem;">●</span> Gemma 4 & SQLite Active
-        </div>
-      <button class="btn" onclick="exportFile('csv')">
-        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-        CSV Ledger
-      </button>
-      <button class="btn" onclick="exportFile('ics')">
-        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-        ICS Calendar
-      </button>
-      <button class="btn" onclick="window.print()">
-        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-        Print Plan
-      </button>
     </div>
   </header>
 
-  <!-- Sticky Solvency HUD -->
-  <section class="solvency-hud" id="solvencyHud">
-    <div class="hud-stat">
-      <div class="hud-label">Target Budget</div>
-      <div class="hud-value" id="hudBudget">₹0</div>
-      <div class="hud-sub" id="hudEventTitle">Loading...</div>
-    </div>
-    <div class="hud-stat">
-      <div class="hud-label">10% Contingency Reserve</div>
-      <div class="hud-value" id="hudContingency">₹0</div>
-      <div class="hud-sub">Emergency buffer</div>
-    </div>
-    <div class="hud-stat">
-      <div class="hud-label">Projected Spend</div>
-      <div class="hud-value" id="hudProjected">₹0</div>
-      <div class="hud-sub" id="hudAllocatable">Allocatable: ₹0</div>
-    </div>
-    <div class="hud-stat">
-      <div class="hud-label">Committed (Paid)</div>
-      <div class="hud-value" id="hudPaid" style="color: var(--emerald);">₹0</div>
-      <div class="hud-sub">Settled deposit advances</div>
-    </div>
-    <div class="hud-stat">
-      <div class="hud-label">Budget Variance</div>
-      <div class="hud-value" id="hudVariance">₹0</div>
-      <div class="hud-sub" id="hudSolvencyStatus">SOLVENT</div>
-    </div>
-  </section>
-
-  <!-- Workspace Tabs -->
-  <nav class="nav-tabs">
-    <button class="tab-btn active" onclick="switchTab('tabMission')">01. Mission Control</button>
-    <button class="tab-btn" onclick="switchTab('tabScenario')">02. Scenario Lab (Decision Impact)</button>
-    <button class="tab-btn" onclick="switchTab('tabCommitments')">03. Commitments Hub</button>
-    <button class="tab-btn" onclick="switchTab('tabOperations')">04. Live Operations</button>
-  </nav>
-
-  <!-- Main Workspaces -->
   <main>
+    <!-- HERO SECTION -->
+    <section class="hero-wrap">
+      <div class="hero-content">
+        <div class="hero-eyebrow-pill">
+          <span>●</span> PromptWars Virtual • Challenge 5 (Celebration & Event Planner)
+        </div>
 
-    <!-- Deficit Banner -->
-    <div id="deficitBanner" class="callout-deficit" style="display: none;">
-      <strong>Solvency Deficit Detected:</strong> Required spend exceeds target budget. Open <em>02. Scenario Lab</em> to cure the deficit via headcount scaling or scope trade-offs.
-    </div>
+        <h1 class="hero-headline">
+          Every decision. Every detail. <br>
+          <span class="hero-accent">Under control.</span>
+        </h1>
 
-    <!-- 01. MISSION CONTROL -->
-    <section id="tabMission" class="workspace-pane active">
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title">
-            <span>Executive Overview</span>
-            <span id="overviewScenarioBadge" class="badge badge-fixed">Scenario v1</span>
+        <p class="hero-deck">
+          The deterministic celebration & event operations platform. Engineered with integer-paise financial math, Google Gemma 4 cognitive quote extraction, Kahn's DAG dependency cascades, and minute-by-minute day-of execution runbooks.
+        </p>
+
+        <div class="hero-actions">
+          <a href="/dashboard" class="btn btn-primary btn-lg">
+            Launch Operational Dashboard →
+          </a>
+          <a href="/dashboard?event=evt-royal-heritage-wedding" class="btn btn-lg">
+            Explore Heritage Wedding (250 Guests)
+          </a>
+          <a href="#interactive-demo" class="btn btn-lg" style="background: transparent; border-color: var(--border-subtle);">
+            Try Decision Simulator ↓
+          </a>
+        </div>
+
+        <!-- Four Key Guarantees Proof Bar -->
+        <div class="proof-strip">
+          <div class="proof-item">
+            <span class="proof-value">₹0 Drift</span>
+            <span class="proof-label">All budgets, line items & taxes computed in exact integer minor units (paise). Zero floating-point rounding errors.</span>
           </div>
-          <table class="data-table">
+          <div class="proof-item">
+            <span class="proof-value">Gemma 4 AI</span>
+            <span class="proof-label">Cognitive quote parsing with Pydantic verification, hidden fee detection, and counter-negotiation scripts.</span>
+          </div>
+          <div class="proof-item">
+            <span class="proof-value">Kahn's DAG</span>
+            <span class="proof-label">Topological dependency engine. Downstream milestones automatically re-flagged when headcount or dates shift.</span>
+          </div>
+          <div class="proof-item">
+            <span class="proof-value">Dual-Track Runbook</span>
+            <span class="proof-label">Minute-by-minute Front-of-House & Back-of-House coordination with midnight-crossing resilience.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- INTERACTIVE DEMO CALCULATOR SECTION -->
+    <section id="interactive-demo" class="editorial-section">
+      <div class="section-container">
+        <div class="section-eyebrow">
+          <span>⚡</span> Live Decision Simulation
+        </div>
+        <h2 class="section-title">Experience Deterministic Scaling in Real Time</h2>
+        <p class="section-subtitle">
+          Toggle event profiles, slide guest headcounts, and adjust venue settings below. Watch Planqira’s mathematical solver recalculate catering, step-tiered seating, and solvency instantly—with zero floating-point approximation.
+        </p>
+
+        <div class="demo-widget-card">
+          <!-- Controls Bar -->
+          <div class="demo-controls-bar">
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.5rem;">
+                <label class="form-label" style="font-size: 0.85rem; font-weight: 700;">Expected Guest Headcount</label>
+                <span id="demoGuestCountBadge" style="font-family: var(--font-sans); font-size: 1.25rem; font-weight: 700; color: var(--accent);">250 Guests</span>
+              </div>
+              <input type="range" id="demoGuestSlider" min="50" max="500" step="10" value="250" oninput="updateHomepageDemo()" style="width: 100%; accent-color: var(--accent); cursor: pointer;">
+              <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                <span>50 Pax (Intimate)</span>
+                <span>250 Pax (Standard)</span>
+                <span>500 Pax (Grand)</span>
+              </div>
+            </div>
+
+            <div>
+              <label class="form-label" style="font-size: 0.85rem; font-weight: 700;">Event Profile Preset</label>
+              <select id="demoPresetSelect" class="form-control" onchange="applyPresetAndDemo()">
+                <option value="wedding">Royal Heritage Wedding (₹12,00,000 Target)</option>
+                <option value="birthday">Cyberpunk 21st Birthday (₹3,50,000 Target)</option>
+                <option value="community">Community Harvest Fest (₹8,00,000 Target)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="form-label" style="font-size: 0.85rem; font-weight: 700;">Venue Setting</label>
+              <select id="demoSettingSelect" class="form-control" onchange="updateHomepageDemo()">
+                <option value="outdoor">Outdoor Lawn (Weather Risk)</option>
+                <option value="indoor">Indoor Hall (Acoustic Cap)</option>
+                <option value="hybrid">Hybrid Canopy (Rain Buffer)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Live Output Metrics -->
+          <div class="demo-output-grid">
+            <div class="demo-metric-box">
+              <span class="demo-metric-label">Food & Banquet (Per Capita)</span>
+              <span class="demo-metric-val" id="demoCateringVal">₹3,67,500</span>
+              <span class="demo-metric-sub" id="demoCateringSub">₹1,400/guest + 5% GST</span>
+            </div>
+
+            <div class="demo-metric-box">
+              <span class="demo-metric-label">Tiered Seating & Tables</span>
+              <span class="demo-metric-val" id="demoTablesVal">₹56,640</span>
+              <span class="demo-metric-sub" id="demoTablesSub">32 tables (1 per 8 guests)</span>
+            </div>
+
+            <div class="demo-metric-box">
+              <span class="demo-metric-label">10% Contingency Reserve</span>
+              <span class="demo-metric-val" id="demoReserveVal">₹1,20,000</span>
+              <span class="demo-metric-sub">Emergency buffer ringfence</span>
+            </div>
+
+            <div class="demo-metric-box" id="demoSolvencyCard" style="background: var(--status-green-bg); border-color: var(--status-green-border);">
+              <span class="demo-metric-label">Solvency Status</span>
+              <span class="demo-metric-val" id="demoSolvencyVal" style="color: var(--status-green); font-size: 1.35rem;">SOLVENT</span>
+              <span class="demo-metric-sub" id="demoSurplusSub" style="color: var(--status-green); font-weight: 600;">₹1,75,860 Surplus</span>
+            </div>
+          </div>
+
+          <!-- Dynamic DAG Operational Impact Feed -->
+          <div class="demo-impact-feed">
+            <div class="feed-header">
+              <span>●</span> Real-Time DAG Operational Invalidation Cascades
+            </div>
+            <ul class="feed-items" id="demoFeedList">
+              <li class="feed-item">Catering contract obligation recalculated at 250 plates</li>
+              <li class="feed-item">Step capacity threshold: 4 dual-sided buffet stations required</li>
+              <li class="feed-item">Outdoor setting: Weather pivot runbook armed for T-6h rain contingency</li>
+              <li class="feed-item">Downstream milestone "Confirm Seating Clusters" marked for reverification</li>
+            </ul>
+          </div>
+
+          <!-- Direct CTA -->
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+            <div style="font-size: 0.85rem; color: var(--text-muted);">
+              All calculations performed via exact integer paise equations matching our backend solver.
+            </div>
+            <a id="demoLaunchBtn" href="/dashboard?event=evt-royal-heritage-wedding&guests=250" class="btn btn-primary" style="padding: 0.65rem 1.4rem; font-size: 0.9rem;">
+              Open This Exact Scenario in Dashboard →
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- FOUR OPERATIONAL PILLARS -->
+    <section id="how-it-works" class="editorial-section">
+      <div class="section-container">
+        <div class="section-eyebrow">
+          <span>01 — 04</span> Master Architecture
+        </div>
+        <h2 class="section-title">The Four Pillars of Event Certainty</h2>
+        <p class="section-subtitle">
+          Most event software provides static checklists and rough budget spreadsheets. Planqira replaces uncertainty with an integrated, deterministic operations architecture.
+        </p>
+
+        <div class="pillars-grid">
+          <!-- Pillar 1 -->
+          <div class="pillar-card">
+            <span class="pillar-number">01</span>
+            <h3 class="pillar-title">Curated Creative Direction & Sensory Blueprints</h3>
+            <p class="pillar-desc">
+              Go beyond generic mood boards. Planqira synthesizes complete sensory concepts—including olfactory scent notes, lighting color warmth, signature ceremony reveals, and concrete DIY budget alternatives.
+            </p>
+            <ul class="pillar-features">
+              <li class="pillar-feature-item">Tailored multi-sensory hooks (e.g. fresh Rajnigandha vs ozone synthwave)</li>
+              <li class="pillar-feature-item">Signature emotional reveal cues with minute-accurate timing</li>
+              <li class="pillar-feature-item">Specific DIY & local-sourcing cost swaps (saving 15–25% on decor)</li>
+              <li class="pillar-feature-item">Harmonized hex palette palettes mapped directly to attire and staging</li>
+            </ul>
+          </div>
+
+          <!-- Pillar 2 -->
+          <div class="pillar-card">
+            <span class="pillar-number">02</span>
+            <h3 class="pillar-title">Deterministic Financial Solver & Solvency Deficits</h3>
+            <p class="pillar-desc">
+              Financial math executed strictly in integer paise with half-up rounding. Supports three transparent pricing models (Fixed, Per-Capita, and Step-Tiered ceil capacity). Never fakes affordability.
+            </p>
+            <ul class="pillar-features">
+              <li class="pillar-feature-item">Integer paise accounting prevents IEEE-754 floating-point balance drift</li>
+              <li class="pillar-feature-item">Automatic Solvency Deficit warning if commitments exceed budget</li>
+              <li class="pillar-feature-item">Contractual advance deposits separated from settled cash payments</li>
+              <li class="pillar-feature-item">RFC-4180 CSV ledger export protected against formula injection</li>
+            </ul>
+          </div>
+
+          <!-- Pillar 3 -->
+          <div class="pillar-card">
+            <span class="pillar-number">03</span>
+            <h3 class="pillar-title">Timeline, Live Runbook & Incident Protocols</h3>
+            <p class="pillar-desc">
+              Preparation milestones compressed for short lead times. Dual-track minute-by-minute runbooks coordinating Front-of-House guests and Back-of-House crew across midnight transitions.
+            </p>
+            <ul class="pillar-features">
+              <li class="pillar-feature-item">Dynamic lead-time task compression (<14 days rapid sprint vs >30 days)</li>
+              <li class="pillar-feature-item">Minute-by-minute FOH vs BOH cues with live completion toggles</li>
+              <li class="pillar-feature-item">Pre-authorized failover switchboards: Weather rain-pivot & Diesel gensets</li>
+              <li class="pillar-feature-item">Live incident logging ledger with severity rankings and resolution tracking</li>
+            </ul>
+          </div>
+
+          <!-- Pillar 4 -->
+          <div class="pillar-card">
+            <span class="pillar-number">04</span>
+            <h3 class="pillar-title">Scenario Lab & Kahn's DAG Impact Engine</h3>
+            <p class="pillar-desc">
+              Simulate headcount jumps, date changes, or venue transitions before committing. Kahn’s cycle-free DAG traverses dependency trees to flag affected tasks and require vendor reconfirmations.
+            </p>
+            <ul class="pillar-features">
+              <li class="pillar-feature-item">Interactive what-if simulations with instant before/after cost diffs</li>
+              <li class="pillar-feature-item">Stale proposal rejection (HTTP 409) if concurrent edits occurred</li>
+              <li class="pillar-feature-item">Downstream tasks invalidated and flagged as NEEDS_REVIEW</li>
+              <li class="pillar-feature-item">Non-destructive forward-revision scenario reversion preserving audit trail</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- AI QUOTE INTELLIGENCE SPOTLIGHT -->
+    <section id="quote-intelligence" class="editorial-section">
+      <div class="section-container">
+        <div class="section-eyebrow">
+          <span>🧠</span> Cognitive Procurement
+        </div>
+        <h2 class="section-title">Google Gemma 4 Cognitive Quote Extraction</h2>
+        <p class="section-subtitle">
+          Vendors send messy, informal proposals over WhatsApp with hidden overtime rates, generator surcharges, and ambiguous terms. Planqira transforms chaos into structured contracts.
+        </p>
+
+        <div class="quote-spotlight-grid">
+          <!-- Raw Text Column -->
+          <div class="quote-raw-col">
+            <div style="font-size: 0.75rem; text-transform: uppercase; color: #9ca3af; margin-bottom: 0.75rem; letter-spacing: 0.05em;">
+              Raw Incoming Vendor WhatsApp Message:
+            </div>
+            <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 4px; border-left: 3px solid #22c55e;">
+              "Namaste! This is Udaipur Royal Feast Caterers. For your Royal Wedding, our Signature Dal Baati Churma & Multi-Cuisine Dinner Buffet is Rs 2200 per guest + 5% GST.<br><br>
+              Minimum advance token is Rs 150000 to lock date by 25th Oct.<br><br>
+              <strong>Note:</strong> Kitchen diesel and live tandoor generator fuel charged extra Rs 15000 on event night."
+            </div>
+            <div style="margin-top: 1.25rem; font-size: 0.75rem; color: #9ca3af;">
+              Processed via official Google GenAI SDK: <code style="color: #6ee7b7;">gemma-4-31b-it</code> / <code style="color: #6ee7b7;">gemma-4-26b-a4b-it</code>
+            </div>
+          </div>
+
+          <!-- Structured Extraction Column -->
+          <div class="quote-parsed-col">
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.75rem;">
+                <span style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--accent);">Structured Extraction</span>
+                <span class="status-badge badge-green">Pydantic Validated</span>
+              </div>
+
+              <div style="font-size: 0.875rem; line-height: 1.6; margin-bottom: 1rem;">
+                <div><strong>Vendor:</strong> Udaipur Royal Feast Caterers</div>
+                <div><strong>Model:</strong> PER_CAPITA @ ₹2,200.00 / guest</div>
+                <div><strong>Taxes:</strong> 5.00% GST (Exact half-up computation)</div>
+                <div><strong>Advance Token:</strong> ₹1,50,000.00 (Due: Oct 25, 2026)</div>
+              </div>
+
+              <!-- Hidden Fee Alert Box -->
+              <div class="callout callout-amber" style="margin-bottom: 1rem; font-size: 0.8125rem;">
+                <strong>⚠️ Hidden Clauses Flagged:</strong>
+                <div style="margin-top: 0.25rem;">• Kitchen diesel and tandoor generator fuel billed extra (₹15,000)</div>
+              </div>
+
+              <!-- Counter Negotiation Script -->
+              <div style="background: var(--surface-subtle); padding: 0.85rem; border-radius: 4px; font-size: 0.8125rem;">
+                <span style="font-weight: 700; color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase;">Generated Counter-Negotiation:</span>
+                <p style="margin-top: 0.35rem; font-style: italic; color: var(--text-main);">
+                  "Reviewing your ₹2,200/guest quote for 250 pax. Could you please confirm if kitchen generator fuel and service staff are all-inclusive within the ₹1.5L token?"
+                </p>
+              </div>
+            </div>
+
+            <div style="margin-top: 1.5rem; display: flex; justify-content: flex-end;">
+              <a href="/dashboard" class="btn btn-sm btn-primary">Try In Dashboard Workspace →</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- CURATED EVENT PROFILES -->
+    <section id="event-types" class="editorial-section">
+      <div class="section-container">
+        <div class="section-eyebrow">
+          <span>🎯</span> Specialized Blueprints
+        </div>
+        <h2 class="section-title">Built for Distinct Celebration Types</h2>
+        <p class="section-subtitle">
+          Every event type demands different logistical rules, contingency switches, and vendor constraints. Explore our three production-ready demonstration events:
+        </p>
+
+        <div class="event-types-grid">
+          <!-- Card 1: Wedding -->
+          <div class="event-type-card">
+            <div>
+              <div class="event-type-header">
+                <span class="event-badge">Weddings & Sangeet</span>
+                <h3 class="event-type-title">Royal Rajputana Heritage Wedding</h3>
+                <p class="event-type-desc">
+                  Multi-ceremony palace celebration in Jaipur with strict Pure Veg & Jain culinary stations, Mandap staging, Baraat coordination, and live shehnai ensembles.
+                </p>
+              </div>
+
+              <table class="event-specs-table">
+                <tr><td>Scale:</td><td>250 Guests</td></tr>
+                <tr><td>Target Budget:</td><td>₹12,00,000</td></tr>
+                <tr><td>Contingency Reserve:</td><td>10% (₹1,20,000)</td></tr>
+                <tr><td>Setting:</td><td>Outdoor Haveli Lawn</td></tr>
+                <tr><td>Operational Focus:</td><td>Weather Failover & Dietary</td></tr>
+              </table>
+            </div>
+
+            <a href="/dashboard?event=evt-royal-heritage-wedding" class="btn btn-primary" style="text-align: center; justify-content: center;">
+              Open Wedding Workspace →
+            </a>
+          </div>
+
+          <!-- Card 2: Birthday -->
+          <div class="event-type-card">
+            <div>
+              <div class="event-type-header">
+                <span class="event-badge">Milestone Birthdays</span>
+                <h3 class="event-type-title">Neo-Tokyo Cyberpunk 21st Birthday</h3>
+                <p class="event-type-desc">
+                  High-energy rooftop celebration in Bengaluru featuring Pan-Asian sliders, molecular mocktails, custom neon tunnel entrance, and 11 PM curfew audio transitions.
+                </p>
+              </div>
+
+              <table class="event-specs-table">
+                <tr><td>Scale:</td><td>75 Guests</td></tr>
+                <tr><td>Target Budget:</td><td>₹3,50,000</td></tr>
+                <tr><td>Contingency Reserve:</td><td>10% (₹35,000)</td></tr>
+                <tr><td>Setting:</td><td>Indoor Glasshouse Rooftop</td></tr>
+                <tr><td>Operational Focus:</td><td>DJ Soundcheck & Curfew</td></tr>
+              </table>
+            </div>
+
+            <a href="/dashboard?event=evt-21st-birthday" class="btn btn-primary" style="text-align: center; justify-content: center;">
+              Open Birthday Workspace →
+            </a>
+          </div>
+
+          <!-- Card 3: Community Fest -->
+          <div class="event-type-card">
+            <div>
+              <div class="event-type-header">
+                <span class="event-badge">Community & Festivals</span>
+                <h3 class="event-type-title">Sunlit Monsoon Harvest Festival</h3>
+                <p class="event-type-desc">
+                  Civic gathering in Pune botanical gardens with solar-powered acoustic stages, zero-waste compost sorting stations, municipal clearance, and crowd routing.
+                </p>
+              </div>
+
+              <table class="event-specs-table">
+                <tr><td>Scale:</td><td>400 Attendees</td></tr>
+                <tr><td>Target Budget:</td><td>₹8,00,000</td></tr>
+                <tr><td>Contingency Reserve:</td><td>10% (₹80,000)</td></tr>
+                <tr><td>Setting:</td><td>Open Amphitheatre</td></tr>
+                <tr><td>Operational Focus:</td><td>Zero-Waste & Civic Permits</td></tr>
+              </table>
+            </div>
+
+            <a href="/dashboard?event=evt-community-ecofest" class="btn btn-primary" style="text-align: center; justify-content: center;">
+              Open Festival Workspace →
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ENGINEERING & ACCOUNTING PHILOSOPHY -->
+    <section id="philosophy" class="editorial-section">
+      <div class="section-container">
+        <div class="section-eyebrow">
+          <span>📐</span> Architectural Rigor
+        </div>
+        <h2 class="section-title">Why Generic Tools Fail at Live Events</h2>
+        <p class="section-subtitle">
+          Spreadsheets hide floating-point inaccuracies, and basic AI wrappers invent impossible budgets. Here is how Planqira compares:
+        </p>
+
+        <div class="comparison-table-wrap">
+          <table class="comp-table">
+            <thead>
+              <tr>
+                <th style="width: 25%;">Capability</th>
+                <th style="width: 25%;">Generic Spreadsheets</th>
+                <th style="width: 25%;">Naive AI Chatbots</th>
+                <th style="width: 25%; background: var(--surface-subtle); color: var(--accent); font-weight: 700;">Planqira Studio</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td style="color:var(--text-muted); width: 140px;">Event Title</td><td id="moTitle" style="font-weight:600;">-</td></tr>
-              <tr><td style="color:var(--text-muted);">Event Type & City</td><td id="moTypeCity">-</td></tr>
-              <tr><td style="color:var(--text-muted);">Date & Headcount</td><td id="moDateGuests">-</td></tr>
-              <tr><td style="color:var(--text-muted);">Currency & Reserve</td><td id="moReserveRate">-</td></tr>
+              <tr>
+                <td><strong>Currency Arithmetic</strong></td>
+                <td><span class="comp-tag-no">✗ Float Drift (0.1 + 0.2 ≠ 0.3)</span></td>
+                <td><span class="comp-tag-no">✗ Fabricated totals</span></td>
+                <td class="highlighted-row"><span class="comp-tag-yes">✓ Exact Integer Paise</span></td>
+              </tr>
+              <tr>
+                <td><strong>Solvency Deficit Handling</strong></td>
+                <td><span class="comp-tag-no">✗ Silent negative numbers</span></td>
+                <td><span class="comp-tag-no">✗ Compresses costs artificially</span></td>
+                <td class="highlighted-row"><span class="comp-tag-yes">✓ Deficit State & Guidance</span></td>
+              </tr>
+              <tr>
+                <td><strong>Deposit Obligations vs Cash</strong></td>
+                <td><span class="comp-tag-no">✗ Conflates balance with paid cash</span></td>
+                <td><span class="comp-tag-no">✗ Ignores payment terms</span></td>
+                <td class="highlighted-row"><span class="comp-tag-yes">✓ Separate Ledger Tables</span></td>
+              </tr>
+              <tr>
+                <td><strong>Downstream Dependency Tracking</strong></td>
+                <td><span class="comp-tag-no">✗ Broken manual cell links</span></td>
+                <td><span class="comp-tag-no">✗ No state tracking</span></td>
+                <td class="highlighted-row"><span class="comp-tag-yes">✓ Kahn's Cycle-Free DAG</span></td>
+              </tr>
+              <tr>
+                <td><strong>Day-Of Live Operations</strong></td>
+                <td><span class="comp-tag-no">✗ Static printed tables</span></td>
+                <td><span class="comp-tag-no">✗ Static suggestions</span></td>
+                <td class="highlighted-row"><span class="comp-tag-yes">✓ Dual FOH/BOH Runbook</span></td>
+              </tr>
+              <tr>
+                <td><strong>Data Security & Exports</strong></td>
+                <td><span class="comp-tag-no">✗ CSV formula injection risk</span></td>
+                <td><span class="comp-tag-no">✗ Plain unescaped text</span></td>
+                <td class="highlighted-row"><span class="comp-tag-yes">✓ RFC-4180 & RFC-5545 Sanitized</span></td>
+              </tr>
             </tbody>
           </table>
         </div>
-
-        <div class="card">
-          <div class="card-title">
-            <span>Spend by Approval Pipeline</span>
-            <span style="font-size:0.75rem; color:var(--text-muted);">Paise Exact</span>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 0.65rem; margin-top: 0.5rem;">
-            <div>
-              <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom: 0.2rem;">
-                <span style="color:var(--emerald);">● APPROVED (Contracts Locked)</span>
-                <span id="pipeApproved" style="font-weight:700;">₹0</span>
-              </div>
-              <div style="background:#2d3748; height:8px; border-radius:4px; overflow:hidden;">
-                <div id="barApproved" style="background:var(--emerald); width:0%; height:100%;"></div>
-              </div>
-            </div>
-            <div>
-              <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom: 0.2rem;">
-                <span style="color:var(--amber);">● QUOTED (In Negotiation)</span>
-                <span id="pipeQuoted" style="font-weight:700;">₹0</span>
-              </div>
-              <div style="background:#2d3748; height:8px; border-radius:4px; overflow:hidden;">
-                <div id="barQuoted" style="background:var(--amber); width:0%; height:100%;"></div>
-              </div>
-            </div>
-            <div>
-              <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom: 0.2rem;">
-                <span style="color:#93c5fd;">● ESTIMATED (Baseline Projections)</span>
-                <span id="pipeEstimated" style="font-weight:700;">₹0</span>
-              </div>
-              <div style="background:#2d3748; height:8px; border-radius:4px; overflow:hidden;">
-                <div id="barEstimated" style="background:#3b82f6; width:0%; height:100%;"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Curated Creative Themes -->
-      <div class="card">
-        <div class="card-title">
-          <span>Curated Creative Concepts (3 Sensory Blueprints)</span>
-          <span style="font-size:0.75rem; color:var(--text-muted);">Engine-Synthesized Aesthetics</span>
-        </div>
-        <div class="grid-3" id="themesContainer"></div>
-      </div>
-
-      <!-- Immutability Audit Log -->
-      <div class="card">
-        <div class="card-title">
-          <span>Immutable Audit Log</span>
-          <span style="font-size:0.75rem; color:var(--text-muted);">Append-only SQLite Ledger</span>
-        </div>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Timestamp</th>
-              <th>Action</th>
-              <th>Description</th>
-              <th>Previous</th>
-              <th>Committed</th>
-            </tr>
-          </thead>
-          <tbody id="auditLogTable"></tbody>
-        </table>
       </div>
     </section>
 
-    <!-- 02. SCENARIO LAB (DECISION IMPACT ENGINE) -->
-    <section id="tabScenario" class="workspace-pane">
-      <div class="slider-box">
-        <div style="display: flex; justify-content: space-between; align-items: baseline;">
-          <div>
-            <div style="font-size: 1.1rem; font-weight: 700;">Simulate Guest Headcount Shift</div>
-            <div style="font-size: 0.8rem; color: var(--text-muted);">
-              Calculates exact paise cost deltas across FIXED, PER_CAPITA, and STEP_TIERED items, and tests DAG invalidations.
-            </div>
-          </div>
-          <div class="headcount-display" id="simHeadcountVal">250</div>
-        </div>
-        <div class="slider-controls">
-          <span style="font-size: 0.8rem; color: var(--text-dim);">50 Guests</span>
-          <input type="range" id="simSlider" min="50" max="600" step="5" value="250" oninput="onSliderMove(this.value)">
-          <span style="font-size: 0.8rem; color: var(--text-dim);">600 Guests</span>
-          <button class="btn btn-primary" onclick="runSimulation()">
-            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-            Compute Decision Impact
-          </button>
-        </div>
-      </div>
 
-      <!-- Simulation Summary Stats -->
-      <div class="grid-3" id="simSummaryStats" style="display: none; margin-bottom: 1.25rem;">
-        <div class="hud-stat">
-          <div class="hud-label">Projected Spend Delta</div>
-          <div class="hud-value" id="simSpendDelta">₹0</div>
-          <div class="hud-sub" id="simDeltaPercent">0% vs baseline</div>
+    <!-- FAQS SECTION -->
+    <section id="faqs" class="editorial-section">
+      <div class="section-container">
+        <div class="section-eyebrow">
+          <span>❓</span> Questions & Answers
         </div>
-        <div class="hud-stat">
-          <div class="hud-label">Simulated Solvency</div>
-          <div class="hud-value" id="simSolvencyStatus">SOLVENT</div>
-          <div class="hud-sub" id="simVariancePaise">Variance: ₹0</div>
-        </div>
-        <div class="hud-stat" style="display:flex; flex-direction:column; justify-content:center;">
-          <button id="btnCommit" class="btn btn-success" style="width:100%; justify-content:center; padding: 0.75rem;" onclick="commitActiveScenario()">
-            Commit as Scenario vNext
-          </button>
-        </div>
-      </div>
+        <h2 class="section-title">Frequently Asked Questions</h2>
+        <p class="section-subtitle">
+          Everything you need to know about Planqira’s financial integrity, cognitive models, and offline operations.
+        </p>
 
-      <!-- DAG Invalidation Callout -->
-      <div id="simDagBox" class="callout-warning" style="display: none;">
-        <strong>DAG Dependency Invalidation:</strong>
-        <div id="simDagList" style="margin-top: 0.4rem; font-size: 0.82rem;"></div>
-      </div>
-
-      <!-- Side-by-Side Line Item Diff Table -->
-      <div class="card" id="simDiffCard" style="display: none;">
-        <div class="card-title">
-          <span>Deterministic Line-Item Breakdown</span>
-          <span style="font-size:0.75rem; color:var(--text-muted);">Exact Formula Pricing</span>
-        </div>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Line Item</th>
-              <th>Formula</th>
-              <th>Base Qty</th>
-              <th>New Qty</th>
-              <th>Unit Cost</th>
-              <th>Base Total</th>
-              <th>New Total</th>
-              <th>Paise Delta</th>
-            </tr>
-          </thead>
-          <tbody id="simDiffTable"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- 03. COMMITMENTS HUB -->
-    <section id="tabCommitments" class="workspace-pane">
-      <div class="card">
-        <div class="card-title">
-          <span>Vendor Commitments & Negotiation Pipeline</span>
-          <button class="btn btn-primary" onclick="openQuoteModal()">
-            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-            AI Vendor Quote Extractor
-          </button>
-        </div>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Category</th>
-              <th>Vendor Name</th>
-              <th>Approval State</th>
-              <th>Total Quote</th>
-              <th>Advance Paid</th>
-              <th>Deposit Due</th>
-              <th>WhatsApp Contact</th>
-              <th>Hidden Fee Question</th>
-            </tr>
-          </thead>
-          <tbody id="vendorTable"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- 04. LIVE OPERATIONS -->
-    <section id="tabOperations" class="workspace-pane">
-      <div class="grid-2">
-        <!-- T-Minus Tasks -->
-        <div class="card">
-          <div class="card-title">
-            <span>T-Minus Task Checklist</span>
-            <span style="font-size:0.75rem; color:var(--text-muted);">Topological DAG Sequence</span>
-          </div>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Timeframe</th>
-                <th>Task Title</th>
-                <th>Owner</th>
-                <th>Priority</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="tasksTable"></tbody>
-          </table>
-        </div>
-
-        <!-- Minute-by-Minute Runbook -->
-        <div class="card">
-          <div class="card-title">
-            <span>Day-Of Runbook (Minute-by-Minute)</span>
-            <span style="font-size:0.75rem; color:var(--text-muted);">Front vs Back-of-House Cues</span>
-          </div>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Time Slot</th>
-                <th>Front of House (Guests)</th>
-                <th>Back of House (Crew)</th>
-                <th>Lead Role</th>
-              </tr>
-            </thead>
-            <tbody id="runbookTable"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Contingency Protocols Switchboard -->
-      <div class="card">
-        <div class="card-title">
-          <span>Operational Contingency Switchboard</span>
-          <span style="font-size:0.75rem; color:var(--text-muted);">Rapid Response Runbooks</span>
-        </div>
-        <div class="grid-3">
-          <div style="background:var(--surface-card); padding:1rem; border-radius:8px; border-left:3px solid #3b82f6;">
-            <div style="font-weight:700; margin-bottom:0.4rem;">🌧️ Rain / Weather Shift Protocol</div>
-            <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.4;">
-              Trigger: Rain probability > 40% at T-6 hours.<br>
-              Action: Shift lawn dinner to Grand Ballroom. Mandap floral canopy transferred under covered archway within 45 mins.
+        <div class="faq-grid">
+          <div class="faq-card">
+            <h3 class="faq-q">Why does Planqira calculate in integer paise?</h3>
+            <p class="faq-a">
+              Standard floating-point numbers in JavaScript and Python suffer from IEEE-754 precision drift (such as 0.1 + 0.2 producing 0.30000000000000004). In wedding and commercial budgets totaling millions of rupees, rounding errors accumulate into contract disputes. Storing and calculating in integer paise (₹1 = 100 paise) guarantees penny-perfect accounting.
             </p>
           </div>
-          <div style="background:var(--surface-card); padding:1rem; border-radius:8px; border-left:3px solid var(--amber);">
-            <div style="font-weight:700; margin-bottom:0.4rem;">⚡ Generator Failover Protocol</div>
-            <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.4;">
-              Trigger: Grid power loss or voltage drop.<br>
-              Action: Secondary 62.5 kVA silent diesel genset is sync-locked. Automatic transfer switch activates under 8 seconds.
+
+          <div class="faq-card">
+            <h3 class="faq-q">Which Google AI models are supported?</h3>
+            <p class="faq-a">
+              Planqira natively integrates Google DeepMind’s latest Gemma 4 models (<code>gemma-4-31b-it</code> and <code>gemma-4-26b-a4b-it</code>) as well as Gemini Flash. Model selection is dynamically configurable via the <code>GEMINI_MODEL</code> or <code>AI_MODEL</code> environment variables without code modification.
             </p>
           </div>
-          <div style="background:var(--surface-card); padding:1rem; border-radius:8px; border-left:3px solid var(--rose);">
-            <div style="font-weight:700; margin-bottom:0.4rem;">🚑 Medical & Safety Protocol</div>
-            <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.4;">
-              Trigger: Medical discomfort or physical slip.<br>
-              Action: 2 on-site first-aid paramedics stationed at hospitality gate. Nearest tertiary hospital is 4.2 km with clear green corridor.
+
+          <div class="faq-card">
+            <h3 class="faq-q">What happens if no API key is configured or quota fails?</h3>
+            <p class="faq-a">
+              Planqira is completely resilient. If the <code>GEMINI_API_KEY</code> is missing or quota is exhausted, the system automatically falls back to an internal heuristic parser with a transparent <code>is_simulated: true</code> flag. The user is never blocked or left with a broken UI.
+            </p>
+          </div>
+
+          <div class="faq-card">
+            <h3 class="faq-q">How does quote approval prevent double counting?</h3>
+            <p class="faq-a">
+              When a vendor quote is approved, Planqira atomically searches for existing estimated line items in that category (e.g. Catering). It marks the estimated item as <code>REPLACED</code> and supersedes it with the exact contract quote line item, preventing costs from being counted twice.
+            </p>
+          </div>
+
+          <div class="faq-card">
+            <h3 class="faq-q">How does non-destructive scenario reversion work?</h3>
+            <p class="faq-a">
+              Unlike destructive rollback scripts that drop database rows, Planqira creates a fresh forward revision (e.g., reverting v2 to v1 produces Scenario v3). It restores line-item states while strictly preserving settled payment records, task history, and audit trails.
+            </p>
+          </div>
+
+          <div class="faq-card">
+            <h3 class="faq-q">Can Planqira be deployed to Vercel and GitHub?</h3>
+            <p class="faq-a">
+              Yes. The codebase includes a native <code>vercel.json</code> and ASGI serverless entry point (<code>api/index.py</code>) running standard Python runtimes. The entire repository footprint is strictly under 1 MB, ensuring lightning-fast CI builds.
             </p>
           </div>
         </div>
       </div>
     </section>
 
+
+    <!-- CLOSING CTA -->
+    <section class="editorial-section" style="background: var(--bg-page);">
+      <div class="section-container">
+        <div class="closing-card">
+          <h2 class="closing-title">Take absolute control of your celebration.</h2>
+          <p class="closing-sub">
+            Join event directors, couples, and community coordinators who plan with deterministic financial models and zero operational surprises.
+          </p>
+          <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+            <a href="/dashboard" class="btn btn-lg" style="background: #ffffff; color: var(--accent); border-color: #ffffff; font-weight: 700;">
+              Launch Operational Dashboard →
+            </a>
+            <a href="/dashboard?event=evt-royal-heritage-wedding" class="btn btn-lg" style="background: transparent; color: #ffffff; border-color: rgba(255,255,255,0.4);">
+              Explore Live Wedding Demo
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
-  <!-- AI QUOTE EXTRACTION MODAL -->
-  <div id="quoteModal" class="modal-overlay">
-    <div class="modal-box">
-      <div class="modal-header">
+  <!-- EDITORIAL FOOTER -->
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-top">
         <div>
-          <div style="font-weight:700; font-size:1.1rem;">AI Vendor Quote Extractor</div>
-          <div style="font-size:0.75rem; color:var(--text-muted);">Powered by Gemma 4 / Google DeepMind Cognitive Engine</div>
-        </div>
-        <button class="btn" onclick="closeQuoteModal()" style="padding:0.25rem 0.6rem;">✕</button>
-      </div>
-      <div class="modal-body">
-        <div style="margin-bottom:0.75rem;">
-          <span style="font-size:0.8rem; color:var(--text-muted); margin-right:0.5rem;">Load 1-Click Sample:</span>
-          <button class="btn" style="font-size:0.75rem; padding:0.25rem 0.5rem;" onclick="loadSampleQuote(1)">Wedding Caterer</button>
-          <button class="btn" style="font-size:0.75rem; padding:0.25rem 0.5rem;" onclick="loadSampleQuote(2)">DJ & Truss Sound</button>
-          <button class="btn" style="font-size:0.75rem; padding:0.25rem 0.5rem;" onclick="loadSampleQuote(3)">Mandap Floral Decor</button>
-        </div>
-        <textarea id="rawQuoteText" class="text-input" placeholder="Paste unstructured WhatsApp vendor quote or email text here..."></textarea>
-        
-        <div style="margin-top:0.75rem; display:flex; justify-content:space-between; align-items:center;">
-          <button class="btn btn-primary" onclick="parseQuoteAction()">
-            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
-            Extract & Structure Line Items
-          </button>
-          <span id="aiParserIndicator" style="font-size:0.75rem; color:var(--text-muted);"></span>
+          <div class="brand-name" style="font-size: 1.35rem; margin-bottom: 0.5rem;">Planqira</div>
+          <p style="font-size: 0.8125rem; color: var(--text-muted); line-height: 1.5; max-width: 320px;">
+            Every decision. Every detail. Under control. Deterministic event operations platform engineered for PromptWars Virtual Challenge 5.
+          </p>
         </div>
 
-        <!-- Extracted Review Section -->
-        <div id="quoteReviewSection" style="display:none; margin-top:1.25rem; border-top:1px solid var(--surface-border); padding-top:1rem;">
-          <div style="font-weight:700; font-size:0.95rem; margin-bottom:0.5rem;">Audit & Review Extracted Quote</div>
-          <div class="grid-2" style="margin-bottom:0.75rem;">
-            <div><span style="color:var(--text-muted); font-size:0.8rem;">Vendor:</span> <strong id="revVendorName">-</strong></div>
-            <div><span style="color:var(--text-muted); font-size:0.8rem;">Category:</span> <strong id="revCategory">-</strong></div>
-            <div><span style="color:var(--text-muted); font-size:0.8rem;">Advance Deposit:</span> <strong id="revAdvance" style="color:var(--amber);">-</strong></div>
-            <div><span style="color:var(--text-muted); font-size:0.8rem;">Deposit Due:</span> <strong id="revDueDate">-</strong></div>
-          </div>
+        <div>
+          <h4 class="footer-col-title">Core Workspaces</h4>
+          <ul class="footer-links">
+            <li><a href="/dashboard?tab=tabIdeas">Creative Direction</a></li>
+            <li><a href="/dashboard?tab=tabBudget">Budget & Commitments</a></li>
+            <li><a href="/dashboard?tab=tabTimeline">Timeline & Operations</a></li>
+            <li><a href="/dashboard?tab=tabScenario">Scenario Lab (DAG)</a></li>
+          </ul>
+        </div>
 
-          <table class="data-table" style="margin-bottom:0.75rem;">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Model</th>
-                <th>Unit Cost</th>
-                <th>Tax Rate</th>
-              </tr>
-            </thead>
-            <tbody id="revItemsTable"></tbody>
-          </table>
+        <div>
+          <h4 class="footer-col-title">Demonstrations</h4>
+          <ul class="footer-links">
+            <li><a href="/dashboard?event=evt-royal-heritage-wedding">Jaipur Royal Wedding</a></li>
+            <li><a href="/dashboard?event=evt-21st-birthday">Cyberpunk 21st Birthday</a></li>
+            <li><a href="/dashboard?event=evt-community-ecofest">Pune Community Eco-Fest</a></li>
+            <li><a href="/api/health">System Health API</a></li>
+          </ul>
+        </div>
 
-          <div id="revFlaggedBox" class="callout-warning" style="display:none;"></div>
-          
-          <div style="background:var(--surface-card); padding:0.75rem; border-radius:6px; font-size:0.8rem;">
-            <div style="font-weight:600; margin-bottom:0.2rem; color:var(--text-muted);">Suggested Counter-Negotiation Script:</div>
-            <div id="revScriptText" style="font-style:italic;"></div>
-          </div>
+        <div>
+          <h4 class="footer-col-title">Standards & Formats</h4>
+          <ul class="footer-links">
+            <li><span style="font-size: 0.85rem; color: var(--text-muted);">RFC-4180 CSV Ledger</span></li>
+            <li><span style="font-size: 0.85rem; color: var(--text-muted);">RFC-5545 iCalendar</span></li>
+            <li><span style="font-size: 0.85rem; color: var(--text-muted);">Pydantic V2 Schemas</span></li>
+            <li><span style="font-size: 0.85rem; color: var(--text-muted);">Gemma 4 Cognitive AI</span></li>
+          </ul>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeQuoteModal()">Cancel</button>
-        <button id="btnApproveQuote" class="btn btn-success" style="display:none;" onclick="approveQuoteAction()">
-          Approve & Commit to Ledger
-        </button>
+
+      <div class="footer-bottom">
+        <div>© 2026 Planqira. Built for PromptWars Virtual Challenge 5: Celebration & Event Planner.</div>
+        <div style="display: flex; gap: 1.5rem;">
+          <span>Single Branch Deployment</span>
+          <span>Zero IEEE-754 Drift</span>
+          <span>Light Theme Design Studio</span>
+        </div>
       </div>
     </div>
-  </div>
+  </footer>
 
-  <!-- JAVASCRIPT OPERATIONS LOGIC -->
+  <!-- Client-side Interactive Mini Demo Logic -->
   <script>
-    let currentEventId = "";
-    let currentEventData = null;
-    let latestSimResult = null;
-    let parsedQuoteData = null;
-
-    const sampleQuotes = {
-      1: "Namaste! This is Udaipur Royal Feast Caterers. For your Royal Wedding, our Signature Dal Baati Churma & Multi-Cuisine Dinner Buffet is Rs 2200 per guest + 5% GST. Minimum advance token is Rs 150000 to lock date by 25th Oct. Note: Kitchen diesel and generator cylinder fuel charged extra Rs 15000.",
-      2: "Hi, this is DJ Aman Sound & Light. Truss lighting, JBL line array setup and smoke machines for Sangeet night is Rs 140000 flat + 18% GST. Advance Rs 40000 due within 7 days. Overtime past 11:30 PM is Rs 18000 per hour.",
-      3: "Mandapam Decorators: Complete Rajputana floral mandap with fresh Rajnigandha, brass urlis, entrance archway and stage sofa is Rs 320000 flat + 18% GST. Advance Rs 80000 needed. Note: Transport beyond city limits charged Rs 80 per km."
+    const demoPresets = {
+      wedding: {
+        id: "evt-royal-heritage-wedding",
+        targetBudgetPaise: 120000000,
+        perCapitaCateringPaise: 140000,
+        cateringTaxBps: 500,
+        baseVenuePaise: 30000000,
+        venueTaxBps: 1800,
+        fixedDecorPaise: 18000000,
+        decorTaxBps: 1800,
+        fixedAudioPhotoPaise: 20000000,
+        audioPhotoTaxBps: 1800,
+        tableUnitCostPaise: 150000,
+        tableStepCap: 8,
+        tableTaxBps: 1800,
+        buffetUnitCostPaise: 600000,
+        buffetStepCap: 75,
+        buffetTaxBps: 1800
+      },
+      birthday: {
+        id: "evt-21st-birthday",
+        targetBudgetPaise: 35000000,
+        perCapitaCateringPaise: 120000,
+        cateringTaxBps: 500,
+        baseVenuePaise: 12000000,
+        venueTaxBps: 1800,
+        fixedDecorPaise: 4500000,
+        decorTaxBps: 1800,
+        fixedAudioPhotoPaise: 5000000,
+        audioPhotoTaxBps: 1800,
+        tableUnitCostPaise: 80000,
+        tableStepCap: 6,
+        tableTaxBps: 1800,
+        buffetUnitCostPaise: 300000,
+        buffetStepCap: 40,
+        buffetTaxBps: 1800
+      },
+      community: {
+        id: "evt-community-ecofest",
+        targetBudgetPaise: 80000000,
+        perCapitaCateringPaise: 60000,
+        cateringTaxBps: 500,
+        baseVenuePaise: 15000000,
+        venueTaxBps: 0,
+        fixedDecorPaise: 8500000,
+        decorTaxBps: 1800,
+        fixedAudioPhotoPaise: 4000000,
+        audioPhotoTaxBps: 1800,
+        tableUnitCostPaise: 250000,
+        tableStepCap: 100,
+        tableTaxBps: 1800,
+        buffetUnitCostPaise: 150000,
+        buffetStepCap: 50,
+        buffetTaxBps: 1800
+      }
     };
 
-    function formatPaise(paise) {
-      if (paise === undefined || paise === null) return "₹0.00";
+    function calcTax(subtotal, bps) {
+      return Math.floor((subtotal * bps + 5000) / 10000);
+    }
+
+    function fmtPaise(paise) {
       const rs = paise / 100;
-      return "₹" + rs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return "₹" + rs.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     }
 
-    async function checkHealth() {
-      try {
-        const res = await fetch("/api/health");
-        const data = await res.json();
-        const pill = document.getElementById("connectionPill");
-        const modelName = data.model || "gemma-4-26b-a4b-it";
-        if (data.has_server_key) {
-          pill.className = "status-pill pill-green";
-          pill.innerHTML = `<span>●</span> Gemma 4 (${modelName}) Active`;
-        } else {
-          pill.className = "status-pill pill-amber";
-          pill.innerHTML = `<span>●</span> Gemma 4 Heuristic Engine (Offline)`;
-        }
-      } catch (e) {
-        console.error(e);
-      }
+    function applyPresetAndDemo() {
+      updateHomepageDemo();
     }
 
-    async function loadEvents() {
-      try {
-        const res = await fetch("/api/events");
-        const data = await res.json();
-        const picker = document.getElementById("eventSelector");
-        picker.innerHTML = "";
-        data.events.forEach(ev => {
-          const opt = document.createElement("option");
-          opt.value = ev.id;
-          opt.textContent = `${ev.title} (${ev.city}) — ${ev.guest_count} Guests`;
-          picker.appendChild(opt);
-        });
+    function updateHomepageDemo() {
+      const guests = parseInt(document.getElementById("demoGuestSlider").value, 10);
+      document.getElementById("demoGuestCountBadge").textContent = guests + " Guests";
 
-        if (data.events.length > 0) {
-          currentEventId = data.events[0].id;
-          await loadEventDetails(currentEventId);
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    }
+      const presetKey = document.getElementById("demoPresetSelect").value;
+      const setting = document.getElementById("demoSettingSelect").value;
+      const p = demoPresets[presetKey] || demoPresets.wedding;
 
-    async function switchEvent(eventId) {
-      currentEventId = eventId;
-      await loadEventDetails(eventId);
-    }
+      // 1. Catering
+      const cateringSub = guests * p.perCapitaCateringPaise;
+      const cateringTax = calcTax(cateringSub, p.cateringTaxBps);
+      const cateringTotal = cateringSub + cateringTax;
+      document.getElementById("demoCateringVal").textContent = fmtPaise(cateringTotal);
+      document.getElementById("demoCateringSub").textContent = fmtPaise(p.perCapitaCateringPaise) + "/guest + " + (p.cateringTaxBps / 100) + "% GST";
 
-    async function loadEventDetails(eventId) {
-      try {
-        const res = await fetch(`/api/events/${eventId}`);
-        const data = await res.json();
-        currentEventData = data;
-        renderAllWorkspaces(data);
-      } catch (e) {
-        console.error(e);
-      }
-    }
+      // 2. Seating & Tables
+      const tablesQty = Math.ceil(guests / p.tableStepCap);
+      const tablesSub = tablesQty * p.tableUnitCostPaise;
+      const tablesTax = calcTax(tablesSub, p.tableTaxBps);
+      const tablesTotal = tablesSub + tablesTax;
+      document.getElementById("demoTablesVal").textContent = fmtPaise(tablesTotal);
+      document.getElementById("demoTablesSub").textContent = tablesQty + " tables (1 per " + p.tableStepCap + " guests)";
 
-    function renderAllWorkspaces(data) {
-      const evt = data.event;
-      const sol = data.solvency;
+      // 3. Buffet stations
+      const buffetQty = Math.ceil(guests / p.buffetStepCap);
+      const buffetSub = buffetQty * p.buffetUnitCostPaise;
+      const buffetTax = calcTax(buffetSub, p.buffetTaxBps);
+      const buffetTotal = buffetSub + buffetTax;
 
-      // Top Solvency HUD
-      document.getElementById("hudBudget").textContent = formatPaise(sol.target_budget_paise);
-      document.getElementById("hudEventTitle").textContent = `${evt.title} • ${evt.guest_count} Guests`;
-      document.getElementById("hudContingency").textContent = formatPaise(sol.contingency_paise);
-      document.getElementById("hudProjected").textContent = formatPaise(sol.total_projected_paise);
-      document.getElementById("hudAllocatable").textContent = `Allocatable: ${formatPaise(sol.allocatable_paise)}`;
-      document.getElementById("hudPaid").textContent = formatPaise(sol.total_paid_paise);
+      // 4. Fixed venue, decor, photo
+      const venueTax = calcTax(p.baseVenuePaise, p.venueTaxBps);
+      const venueTotal = p.baseVenuePaise + venueTax;
 
-      const varEl = document.getElementById("hudVariance");
-      const solEl = document.getElementById("hudSolvencyStatus");
-      const defBanner = document.getElementById("deficitBanner");
+      const decorTax = calcTax(p.fixedDecorPaise, p.decorTaxBps);
+      const decorTotal = p.fixedDecorPaise + decorTax;
 
-      if (sol.solvency_status === "SOLVENT") {
-        varEl.textContent = `+${formatPaise(sol.variance_paise)} Surplus`;
-        varEl.style.color = "var(--emerald)";
-        solEl.textContent = "SOLVENT (BALANCED)";
-        solEl.style.color = "var(--emerald)";
-        defBanner.style.display = "none";
+      const audioTax = calcTax(p.fixedAudioPhotoPaise, p.audioPhotoTaxBps);
+      const audioTotal = p.fixedAudioPhotoPaise + audioTax;
+
+      // Setting adjustment
+      let settingFactor = 1.0;
+      if (setting === "indoor") settingFactor = 0.95;
+      if (setting === "hybrid") settingFactor = 1.08;
+      const adjustedVenueTotal = Math.floor(venueTotal * settingFactor);
+
+      // Projected Outlay
+      const projectedTotal = cateringTotal + tablesTotal + buffetTotal + adjustedVenueTotal + decorTotal + audioTotal;
+
+      // 10% Reserve
+      const reserve = Math.floor((projectedTotal * 1000 + 5000) / 10000);
+      document.getElementById("demoReserveVal").textContent = fmtPaise(reserve);
+
+      const grandTotal = projectedTotal + reserve;
+      const variance = p.targetBudgetPaise - grandTotal;
+
+      const card = document.getElementById("demoSolvencyCard");
+      const valEl = document.getElementById("demoSolvencyVal");
+      const subEl = document.getElementById("demoSurplusSub");
+
+      if (variance >= 0) {
+        card.style.background = "var(--status-green-bg)";
+        card.style.borderColor = "var(--status-green-border)";
+        valEl.textContent = "SOLVENT";
+        valEl.style.color = "var(--status-green)";
+        subEl.textContent = fmtPaise(variance) + " Allocated Surplus";
+        subEl.style.color = "var(--status-green)";
       } else {
-        varEl.textContent = `${formatPaise(sol.variance_paise)} Deficit`;
-        varEl.style.color = "var(--rose)";
-        solEl.textContent = "SOLVENCY DEFICIT";
-        solEl.style.color = "var(--rose)";
-        defBanner.style.display = "block";
+        card.style.background = "var(--status-red-bg)";
+        card.style.borderColor = "var(--status-red-border)";
+        valEl.textContent = "DEFICIT";
+        valEl.style.color = "var(--status-red)";
+        subEl.textContent = fmtPaise(Math.abs(variance)) + " Over Budget Deficit";
+        subEl.style.color = "var(--status-red)";
       }
 
-      // Mission Control Overview
-      document.getElementById("overviewScenarioBadge").textContent = `Scenario v${evt.active_scenario_version}`;
-      document.getElementById("moTitle").textContent = evt.title;
-      document.getElementById("moTypeCity").textContent = `${evt.event_type} in ${evt.city}`;
-      document.getElementById("moDateGuests").textContent = `${evt.event_date} (${evt.guest_count} Expected Guests)`;
-      document.getElementById("moReserveRate").textContent = `${evt.currency} (${evt.contingency_bps / 100}% Contingency)`;
+      // Dynamic Feed Updates
+      const feed = document.getElementById("demoFeedList");
+      feed.innerHTML = "";
 
-      // Spend Pipeline
-      const totalProj = Math.max(1, sol.total_projected_paise);
-      const appPaise = sol.breakdown_by_approval_paise.APPROVED || 0;
-      const quoPaise = sol.breakdown_by_approval_paise.QUOTED || 0;
-      const estPaise = sol.breakdown_by_approval_paise.ESTIMATED || 0;
+      const li1 = document.createElement("li");
+      li1.className = "feed-item";
+      li1.textContent = "Catering commitment scaled: " + guests + " plates = " + fmtPaise(cateringTotal);
+      feed.appendChild(li1);
 
-      document.getElementById("pipeApproved").textContent = formatPaise(appPaise);
-      document.getElementById("barApproved").style.width = `${Math.min(100, (appPaise / totalProj) * 100)}%`;
+      const li2 = document.createElement("li");
+      li2.className = "feed-item";
+      li2.textContent = "Step-Tiered threshold: " + buffetQty + " buffet stations required (1 per " + p.buffetStepCap + " pax)";
+      feed.appendChild(li2);
 
-      document.getElementById("pipeQuoted").textContent = formatPaise(quoPaise);
-      document.getElementById("barQuoted").style.width = `${Math.min(100, (quoPaise / totalProj) * 100)}%`;
-
-      document.getElementById("pipeEstimated").textContent = formatPaise(estPaise);
-      document.getElementById("barEstimated").style.width = `${Math.min(100, (estPaise / totalProj) * 100)}%`;
-
-      // Themes
-      const themesContainer = document.getElementById("themesContainer");
-      themesContainer.innerHTML = "";
-      (data.themes || []).forEach(th => {
-        const card = document.createElement("div");
-        card.className = `theme-card ${th.is_selected ? 'selected' : ''}`;
-        
-        let swatchesHtml = "";
-        (th.palette_hex || []).forEach(hex => {
-          swatchesHtml += `<div class="swatch" style="background:${hex};" title="${hex}"></div>`;
-        });
-
-        card.innerHTML = `
-          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-            <div style="font-weight:700; font-size:0.95rem;">${th.name}</div>
-            ${th.is_selected ? '<span class="badge badge-approved">Active Theme</span>' : ''}
-          </div>
-          <div style="font-size:0.78rem; color:var(--text-muted);">${th.tagline}</div>
-          <div class="swatch-row">${swatchesHtml}</div>
-          <div style="font-size:0.75rem; color:var(--text-muted);"><strong style="color:var(--text-main);">Sensory:</strong> ${th.sensory_hook}</div>
-          <div style="font-size:0.75rem; color:var(--text-muted);"><strong style="color:var(--text-main);">Signature:</strong> ${th.signature_moment}</div>
-          <div style="font-size:0.72rem; color:var(--emerald); background:var(--emerald-bg); padding:0.35rem 0.5rem; border-radius:4px;">
-            💡 <strong>DIY Cost Swap:</strong> ${th.diy_swap}
-          </div>
-        `;
-        themesContainer.appendChild(card);
-      });
-
-      // Audit Logs
-      const auditTbody = document.getElementById("auditLogTable");
-      auditTbody.innerHTML = "";
-      (data.audit_logs || []).forEach(log => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td style="font-family:monospace; font-size:0.75rem; color:var(--text-dim);">${log.timestamp.replace('T', ' ').replace('Z', '')}</td>
-          <td><span class="badge badge-fixed">${log.action_type}</span></td>
-          <td>${log.description}</td>
-          <td style="color:var(--text-dim);">${log.previous_value || '—'}</td>
-          <td style="color:var(--emerald);">${log.new_value || '—'}</td>
-        `;
-        auditTbody.appendChild(tr);
-      });
-
-      // Scenario Lab Init
-      const slider = document.getElementById("simSlider");
-      slider.value = evt.guest_count;
-      document.getElementById("simHeadcountVal").textContent = evt.guest_count;
-
-      // Vendors Table
-      const vTbody = document.getElementById("vendorTable");
-      vTbody.innerHTML = "";
-      (data.vendors || []).forEach(v => {
-        const tr = document.createElement("tr");
-        const statusBadge = v.approval_state === 'APPROVED' ? 'badge-approved' : (v.approval_state === 'QUOTED' ? 'badge-quoted' : 'badge-rejected');
-        const waText = encodeURIComponent(`Hi ${v.vendor_name}, following up regarding our event "${evt.title}". Total quote: ₹${v.total_quote_paise/100}.`);
-        
-        tr.innerHTML = `
-          <td><span class="badge badge-fixed">${v.category}</span></td>
-          <td style="font-weight:600;">${v.vendor_name}</td>
-          <td><span class="badge ${statusBadge}">${v.approval_state}</span></td>
-          <td style="font-weight:700;">${formatPaise(v.total_quote_paise)}</td>
-          <td style="color:var(--emerald);">${formatPaise(v.paid_amount_paise)}</td>
-          <td style="font-size:0.78rem; color:var(--text-dim);">${v.deposit_due_date || 'N/A'}</td>
-          <td>
-            <a href="https://wa.me/?text=${waText}" target="_blank" class="btn" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:#25D366; border-color:rgba(37,211,102,0.3);">
-              💬 WhatsApp
-            </a>
-          </td>
-          <td style="font-size:0.75rem; color:var(--text-muted);">${v.hidden_fee_question || '—'}</td>
-        `;
-        vTbody.appendChild(tr);
-      });
-
-      // Tasks Table
-      const tTbody = document.getElementById("tasksTable");
-      tTbody.innerHTML = "";
-      (data.tasks || []).forEach(t => {
-        const tr = document.createElement("tr");
-        const guestBadge = t.depends_on_guests ? '<span class="badge badge-tiered" style="font-size:0.65rem; margin-left:0.3rem;">Headcount Sensitive</span>' : '';
-        tr.innerHTML = `
-          <td style="font-size:0.78rem; color:var(--text-dim); font-weight:600;">${t.timeframe}</td>
-          <td>${t.title} ${guestBadge}</td>
-          <td style="color:var(--text-muted);">${t.owner}</td>
-          <td><span class="badge ${t.priority === 'CRITICAL' ? 'badge-rejected' : 'badge-fixed'}">${t.priority}</span></td>
-          <td><span class="badge ${t.status === 'DONE' ? 'badge-approved' : 'badge-quoted'}">${t.status}</span></td>
-        `;
-        tTbody.appendChild(tr);
-      });
-
-      // Runbook Table
-      const rbTbody = document.getElementById("runbookTable");
-      rbTbody.innerHTML = "";
-      (data.runbook || []).forEach(rb => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td style="font-family:monospace; font-size:0.8rem; font-weight:700; color:var(--primary);">${rb.time_slot}</td>
-          <td style="font-weight:500;">${rb.front_of_house}</td>
-          <td style="color:var(--text-muted);">${rb.back_of_house}</td>
-          <td><span class="badge badge-fixed">${rb.lead_role}</span></td>
-        `;
-        rbTbody.appendChild(tr);
-      });
-    }
-
-    function switchTab(tabId) {
-      document.querySelectorAll(".workspace-pane").forEach(p => p.classList.remove("active"));
-      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-      
-      const targetPane = document.getElementById(tabId);
-      if (targetPane) targetPane.classList.add("active");
-
-      const btns = document.querySelectorAll(".tab-btn");
-      if (tabId === 'tabMission') btns[0].classList.add("active");
-      if (tabId === 'tabScenario') btns[1].classList.add("active");
-      if (tabId === 'tabCommitments') btns[2].classList.add("active");
-      if (tabId === 'tabOperations') btns[3].classList.add("active");
-    }
-
-    function onSliderMove(val) {
-      document.getElementById("simHeadcountVal").textContent = val;
-    }
-
-    async function runSimulation() {
-      const guests = parseInt(document.getElementById("simSlider").value, 10);
-      try {
-        const res = await fetch(`/api/events/${currentEventId}/simulate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ new_guests: guests })
-        });
-        const sim = await res.json();
-        latestSimResult = sim;
-
-        document.getElementById("simSummaryStats").style.display = "grid";
-        document.getElementById("simDiffCard").style.display = "block";
-
-        const deltaEl = document.getElementById("simSpendDelta");
-        if (sim.cost_delta_paise >= 0) {
-          deltaEl.textContent = `+${formatPaise(sim.cost_delta_paise)}`;
-          deltaEl.style.color = "var(--rose)";
-        } else {
-          deltaEl.textContent = `${formatPaise(sim.cost_delta_paise)}`;
-          deltaEl.style.color = "var(--emerald)";
-        }
-
-        const pct = ((sim.cost_delta_paise / (sim.baseline_projected_paise || 1)) * 100).toFixed(1);
-        document.getElementById("simDeltaPercent").textContent = `${pct >= 0 ? '+' : ''}${pct}% spend shift`;
-
-        const solEl = document.getElementById("simSolvencyStatus");
-        solEl.textContent = sim.simulated_solvency_status;
-        solEl.style.color = sim.simulated_solvency_status === 'SOLVENT' ? 'var(--emerald)' : 'var(--rose)';
-        document.getElementById("simVariancePaise").textContent = `Variance: ${formatPaise(sim.simulated_variance_paise)}`;
-
-        // DAG impacts
-        const dagBox = document.getElementById("simDagBox");
-        const dagList = document.getElementById("simDagList");
-        if (sim.dag_impacts && sim.dag_impacts.length > 0) {
-          dagBox.style.display = "block";
-          dagList.innerHTML = sim.dag_impacts.map(i => `• <strong>${i.title}</strong>: ${i.reason} (<em>${i.new_action}</em>)`).join("<br>");
-        } else {
-          dagBox.style.display = "none";
-        }
-
-        // Render Diffs Table
-        const diffTbody = document.getElementById("simDiffTable");
-        diffTbody.innerHTML = "";
-        sim.item_diffs.forEach(d => {
-          const tr = document.createElement("tr");
-          const modelBadge = d.pricing_model === 'FIXED' ? 'badge-fixed' : (d.pricing_model === 'PER_CAPITA' ? 'badge-percapita' : 'badge-tiered');
-          const deltaColor = d.delta_paise > 0 ? 'var(--rose)' : (d.delta_paise < 0 ? 'var(--emerald)' : 'var(--text-dim)');
-          
-          tr.innerHTML = `
-            <td style="font-weight:600;">${d.name} <span style="font-size:0.7rem; color:var(--text-dim);">(${d.category})</span></td>
-            <td><span class="badge ${modelBadge}">${d.pricing_model}</span></td>
-            <td>${d.base_quantity}</td>
-            <td style="font-weight:700;">${d.new_quantity}</td>
-            <td>${formatPaise(d.unit_cost_paise)}</td>
-            <td>${formatPaise(d.base_total_paise)}</td>
-            <td style="font-weight:700;">${formatPaise(d.new_total_paise)}</td>
-            <td style="color:${deltaColor}; font-weight:700;">${d.delta_paise >= 0 ? '+' : ''}${formatPaise(d.delta_paise)}</td>
-          `;
-          diffTbody.appendChild(tr);
-        });
-
-      } catch (e) {
-        console.error(e);
+      const li3 = document.createElement("li");
+      li3.className = "feed-item";
+      if (setting === "outdoor") {
+        li3.textContent = "Outdoor Setting: Weather pivot protocol active (T-6h lawn-to-hall contingency)";
+      } else if (setting === "indoor") {
+        li3.textContent = "Indoor Hall: Acoustic noise limiter enforced past 10:30 PM";
+      } else {
+        li3.textContent = "Hybrid Canopy: Water runoff trenching and portico walkway required";
       }
+      feed.appendChild(li3);
+
+      const li4 = document.createElement("li");
+      li4.className = "feed-item";
+      li4.textContent = "DAG Dependency: Milestones 'Confirm Seating' and 'Table Florals' flagged for reverification";
+      feed.appendChild(li4);
+
+      // Deep link button
+      const launchBtn = document.getElementById("demoLaunchBtn");
+      launchBtn.href = `/dashboard?event=${p.id}&guests=${guests}&tab=tabScenario`;
     }
 
-    async function commitActiveScenario() {
-      if (!latestSimResult) return;
-      const guests = latestSimResult.new_guests;
-      const note = `Adjusted guest headcount to ${guests}`;
-      
-      const itemsPayload = currentEventData.budget_items.map(it => {
-        return {
-          id: it.id,
-          category: it.category,
-          name: it.name,
-          pricing_model: it.pricing_model,
-          unit_cost_paise: it.unit_cost_paise,
-          step_capacity: it.step_capacity,
-          tax_rate_bps: it.tax_rate_bps,
-          approval_state: it.approval_state,
-          paid_amount_paise: it.paid_amount_paise,
-          deposit_due_date: it.deposit_due_date,
-          notes: it.notes
-        };
-      });
-
-      try {
-        const res = await fetch(`/api/events/${currentEventId}/commit-scenario`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            new_guests: guests,
-            new_budget_items: itemsPayload,
-            note: note
-          })
-        });
-        const result = await res.json();
-        if (result.success) {
-          alert(`Scenario v${result.new_version} committed transactionally to SQLite!`);
-          await loadEventDetails(currentEventId);
-          switchTab('tabMission');
-        }
-      } catch (e) {
-        console.error(e);
-        alert("Failed to commit scenario.");
-      }
-    }
-
-    function exportFile(format) {
-      if (!currentEventId) return;
-      window.location.href = `/api/events/${currentEventId}/export.${format}`;
-    }
-
-    // Modal & AI Quote Extractor Logic
-    function openQuoteModal() {
-      document.getElementById("quoteModal").classList.add("open");
-    }
-    function closeQuoteModal() {
-      document.getElementById("quoteModal").classList.remove("open");
-      document.getElementById("quoteReviewSection").style.display = "none";
-      document.getElementById("btnApproveQuote").style.display = "none";
-    }
-
-    function loadSampleQuote(idx) {
-      document.getElementById("rawQuoteText").value = sampleQuotes[idx] || "";
-    }
-
-    async function parseQuoteAction() {
-      const rawText = document.getElementById("rawQuoteText").value.trim();
-      if (!rawText) {
-        alert("Please paste or select a sample vendor message.");
-        return;
-      }
-      const ind = document.getElementById("aiParserIndicator");
-      ind.textContent = "Extracting line items...";
-
-      try {
-        const res = await fetch(`/api/events/${currentEventId}/parse-quote`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ raw_quote_text: rawText })
-        });
-        const data = await res.json();
-        ind.textContent = data.is_simulated ? "Gemma 4 Simulated Mode (Offline Heuristic)" : `Gemma 4 Structured Output (${data.model || 'gemma-4'})`;
-
-        parsedQuoteData = data.data;
-        document.getElementById("quoteReviewSection").style.display = "block";
-        document.getElementById("btnApproveQuote").style.display = "inline-flex";
-
-        document.getElementById("revVendorName").textContent = parsedQuoteData.vendor_name;
-        document.getElementById("revCategory").textContent = parsedQuoteData.category;
-        document.getElementById("revAdvance").textContent = formatPaise(parsedQuoteData.advance_deposit_paise);
-        document.getElementById("revDueDate").textContent = parsedQuoteData.deposit_due_date || 'N/A';
-        document.getElementById("revScriptText").textContent = parsedQuoteData.suggested_negotiation_reply || '—';
-
-        // Items table
-        const revTbody = document.getElementById("revItemsTable");
-        revTbody.innerHTML = "";
-        parsedQuoteData.extracted_items.forEach(it => {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td style="font-weight:600;">${it.name}</td>
-            <td><span class="badge badge-fixed">${it.pricing_model}</span></td>
-            <td>${formatPaise(it.unit_cost_paise)}</td>
-            <td>${it.tax_rate_bps / 100}%</td>
-          `;
-          revTbody.appendChild(tr);
-        });
-
-        // Flagged clauses
-        const flagBox = document.getElementById("revFlaggedBox");
-        if (parsedQuoteData.flagged_clauses && parsedQuoteData.flagged_clauses.length > 0) {
-          flagBox.style.display = "block";
-          flagBox.innerHTML = `<strong>⚠️ Flagged Hidden Fee Clauses:</strong><br>${parsedQuoteData.flagged_clauses.join("<br>")}`;
-        } else {
-          flagBox.style.display = "none";
-        }
-
-      } catch (e) {
-        console.error(e);
-        ind.textContent = "Extraction failed.";
-      }
-    }
-
-    async function approveQuoteAction() {
-      if (!parsedQuoteData) return;
-      try {
-        const payload = {
-          vendor_name: parsedQuoteData.vendor_name,
-          category: parsedQuoteData.category,
-          items: parsedQuoteData.extracted_items,
-          advance_deposit_paise: parsedQuoteData.advance_deposit_paise,
-          deposit_due_date: parsedQuoteData.deposit_due_date,
-          notes: "Approved via Gemini AI Quote Extractor"
-        };
-        const res = await fetch(`/api/events/${currentEventId}/approve-quote`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        const result = await res.json();
-        if (result.success) {
-          alert(result.message);
-          closeQuoteModal();
-          await loadEventDetails(currentEventId);
-        }
-      } catch (e) {
-        console.error(e);
-        alert("Failed to approve quote.");
-      }
-    }
-
-    // Startup
-    window.addEventListener("DOMContentLoaded", async () => {
-      await checkHealth();
-      await loadEvents();
-    });
+    // Init on load
+    window.addEventListener("DOMContentLoaded", updateHomepageDemo);
   </script>
 </body>
 </html>

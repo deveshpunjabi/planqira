@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Planqira — Operational Dashboard & Control Plane</title>
+  <meta name="description" content="Planqira Operational Dashboard: Deterministic Financial Solver, Decision Impact DAG, Vendor Commitments, and Minute-by-Minute Live Runbook.">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+  <!-- Top App Navigation -->
+  <header class="app-header">
+    <div class="brand-section">
+      <a href="/" class="btn btn-sm" style="text-decoration: none; margin-right: 0.5rem;" title="Return to Public Homepage">← Overview</a>
+      <a href="/" style="text-decoration: none; color: inherit;"><span class="brand-name">Planqira</span></a>
+      <span class="brand-tagline">Every decision. Every detail. Under control.</span>
+    </div>
+
+    <div class="header-controls">
+      <select id="eventSelector" class="select-input" onchange="switchEvent(this.value)">
+        <option value="">Loading celebrations...</option>
+      </select>
+
+      <span id="connectionPill" class="status-badge badge-neutral">Connecting...</span>
+
+      <button class="btn btn-primary" onclick="openCreateEventModal()">
+        + Create Event
+      </button>
+
+      <button class="btn" onclick="exportFile('csv')" title="Download CSV ledger">
+        CSV Ledger
+      </button>
+      <button class="btn" onclick="exportFile('ics')" title="Export ICS calendar">
+        ICS Calendar
+      </button>
+      <button class="btn" onclick="window.print()" title="Print complete plan">
+        Print
+      </button>
+    </div>
+  </header>
+
+  <!-- Event Header Strip -->
+  <section class="event-header-strip">
+    <div class="event-title-row">
+      <h1 class="event-main-title" id="headerEventTitle">Loading Celebration...</h1>
+      <div>
+        <span id="metaVersionBadge" class="status-badge badge-neutral">Scenario v1</span>
+        <button class="btn btn-sm" style="margin-left: 0.5rem;" onclick="openRevertModal()">Revert Scenario</button>
+      </div>
+    </div>
+    <div class="event-meta-line">
+      <span class="event-meta-item" id="metaTypeCity">-</span>
+      <span>•</span>
+      <span class="event-meta-item" id="metaDateTime">-</span>
+      <span>•</span>
+      <span class="event-meta-item" id="metaGuests">-</span>
+    </div>
+  </section>
+
+  <!-- Financial Aligned Summary Strip -->
+  <section class="financial-strip">
+    <div class="fin-metric">
+      <span class="fin-label">Target Budget</span>
+      <span class="fin-value" id="finBudget">₹0</span>
+      <span class="fin-sub">Allocated funds</span>
+    </div>
+    <div class="fin-divider"></div>
+
+    <div class="fin-metric">
+      <span class="fin-label">10% Contingency Reserve</span>
+      <span class="fin-value" id="finReserve">₹0</span>
+      <span class="fin-sub">Emergency buffer</span>
+    </div>
+    <div class="fin-divider"></div>
+
+    <div class="fin-metric">
+      <span class="fin-label">Projected Spend</span>
+      <span class="fin-value" id="finProjected">₹0</span>
+      <span class="fin-sub">Active line items</span>
+    </div>
+    <div class="fin-divider"></div>
+
+    <div class="fin-metric">
+      <span class="fin-label">Approved Contracts</span>
+      <span class="fin-value" id="finCommitted" style="color: var(--status-green);">₹0</span>
+      <span class="fin-sub">Locked commitments</span>
+    </div>
+    <div class="fin-divider"></div>
+
+    <div class="fin-metric">
+      <span class="fin-label">Actual Cash Paid</span>
+      <span class="fin-value" id="finPaid" style="color: var(--status-green);">₹0</span>
+      <span class="fin-sub">Settled advances</span>
+    </div>
+    <div class="fin-divider"></div>
+
+    <div class="fin-metric">
+      <span class="fin-label">Outstanding Payable</span>
+      <span class="fin-value" id="finOutstanding">₹0</span>
+      <span class="fin-sub">Pending settlement</span>
+    </div>
+    <div class="fin-divider"></div>
+
+    <div class="fin-metric">
+      <span class="fin-label">Solvency Balance</span>
+      <span class="fin-value" id="finVariance">₹0</span>
+      <span id="finSolvencyStatus" class="status-badge badge-green" style="margin-top: 0.15rem; width: fit-content;">SOLVENT</span>
+    </div>
+  </section>
+
+  <!-- Workspace Tabs -->
+  <nav class="tabs-navigation">
+    <button class="tab-button active" onclick="switchTab('tabIdeas')">01. Ideas & Concepts</button>
+    <button class="tab-button" onclick="switchTab('tabBudget')">02. Budget & Commitments</button>
+    <button class="tab-button" onclick="switchTab('tabTimeline')">03. Timeline & Operations</button>
+    <button class="tab-button" onclick="switchTab('tabScenario')">04. Scenario Lab (Decision Impact)</button>
+  </nav>
+
+  <!-- Main Workspaces -->
+  <main class="workspace-main">
+
+    <!-- Deficit Banner -->
+    <div id="deficitBanner" class="callout callout-red" style="display: none;">
+      <strong>Solvency Deficit Detected:</strong> Total required spend (projected costs + 10% contingency) exceeds your target budget. Open <em>04. Scenario Lab</em> to preview headcount scaling or scope trade-offs to balance the plan.
+    </div>
+
+    <!-- 01. IDEAS & CONCEPTS WORKSPACE -->
+    <section id="tabIdeas" class="workspace-pane active">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Curated Creative Concepts</h2>
+            <div class="panel-subtitle">Tailored sensory blueprints, color swatches, signature moments, and cost-saving alternatives.</div>
+          </div>
+        </div>
+        <div class="grid-3" id="themesContainer"></div>
+      </div>
+
+      <!-- Audit Trail Preview -->
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Immutable Audit Trail</h2>
+            <div class="panel-subtitle">Append-only relational ledger recording decisions, scenario mutations, and contract approvals.</div>
+          </div>
+        </div>
+        <table class="table-clean">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Action</th>
+              <th>Description</th>
+              <th>Previous</th>
+              <th>Committed</th>
+            </tr>
+          </thead>
+          <tbody id="auditLogTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 02. BUDGET & COMMITMENTS WORKSPACE -->
+    <section id="tabBudget" class="workspace-pane">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Deterministic Budget Ledger</h2>
+            <div class="panel-subtitle">Calculated in exact integer paise. Pricing models: FIXED, PER_CAPITA, and STEP_TIERED.</div>
+          </div>
+        </div>
+        <table class="table-clean">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Item Name</th>
+              <th>Formula</th>
+              <th class="numeric">Unit Cost</th>
+              <th class="numeric">Qty</th>
+              <th class="numeric">Subtotal</th>
+              <th class="numeric">Tax %</th>
+              <th class="numeric">Tax Amount</th>
+              <th class="numeric">Total Cost</th>
+              <th>Approval State</th>
+              <th>Payment Status</th>
+              <th class="numeric">Paid Cash</th>
+            </tr>
+          </thead>
+          <tbody id="budgetTableBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Vendor Commitments & Negotiation Pipeline -->
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Vendor Commitments & Negotiation Pipeline</h2>
+            <div class="panel-subtitle">Contracts, deposit obligations, direct WhatsApp outreach, and trap questions.</div>
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-primary" onclick="openQuoteModal()">AI Quote Extractor</button>
+            <button class="btn" onclick="openRecordPaymentModal()">Record Payment</button>
+          </div>
+        </div>
+        <table class="table-clean">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Vendor Name</th>
+              <th>Approval State</th>
+              <th class="numeric">Contract Quote</th>
+              <th class="numeric">Deposit Required</th>
+              <th class="numeric">Paid Cash</th>
+              <th>WhatsApp Inquiry</th>
+              <th>Hidden Fee Trap Question</th>
+            </tr>
+          </thead>
+          <tbody id="vendorTableBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Actual Cash Flow Ledger -->
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Actual Cash Flow Ledger</h2>
+            <div class="panel-subtitle">Verified settled payments recorded against contractual obligations.</div>
+          </div>
+        </div>
+        <table class="table-clean">
+          <thead>
+            <tr>
+              <th>Settled Timestamp</th>
+              <th class="numeric">Amount</th>
+              <th>Method</th>
+              <th>Reference Note</th>
+              <th>Transaction ID</th>
+            </tr>
+          </thead>
+          <tbody id="paymentsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 03. TIMELINE & OPERATIONS WORKSPACE -->
+    <section id="tabTimeline" class="workspace-pane">
+      <div class="grid-2">
+        <!-- T-Minus Tasks -->
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">T-Minus Preparation Tasks</h2>
+              <div class="panel-subtitle">Topological sequence with headcount sensitivity flags.</div>
+            </div>
+          </div>
+          <table class="table-clean">
+            <thead>
+              <tr>
+                <th>Timeframe</th>
+                <th>Task Title</th>
+                <th>Owner</th>
+                <th>Due Date</th>
+                <th>Priority</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="tasksTableBody"></tbody>
+          </table>
+        </div>
+
+        <!-- Minute-by-Minute Runbook -->
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Day-Of Runbook (Minute-by-Minute)</h2>
+              <div class="panel-subtitle">Front-of-House (Guests) vs Back-of-House (Crew/Vendors).</div>
+            </div>
+          </div>
+          <table class="table-clean">
+            <thead>
+              <tr>
+                <th>Time Slot</th>
+                <th>Front of House</th>
+                <th>Back of House</th>
+                <th>Lead Role</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="runbookTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Contingency Protocols Switchboard -->
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Operational Contingency Switchboard</h2>
+            <div class="panel-subtitle">Pre-authorized failover runbooks for real-life weather and infrastructure shifts.</div>
+          </div>
+        </div>
+        <div class="grid-3">
+          <div style="background: var(--surface-subtle); padding: 1rem; border-left: 3px solid var(--status-blue); border-radius: 2px;">
+            <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.25rem;">🌧️ Rain / Weather Pivot Protocol</div>
+            <p style="font-size: 0.8125rem; color: var(--text-secondary); line-height: 1.45;">
+              Trigger: Precipitation probability > 40% at T-6 hours.<br>
+              Action: Lawn seating shifted into reserved indoor Ballroom. Mandap florals transitioned under covered portico in 45 minutes.
+            </p>
+          </div>
+
+          <div style="background: var(--surface-subtle); padding: 1rem; border-left: 3px solid var(--status-amber); border-radius: 2px;">
+            <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.25rem;">⚡ Power & Generator Failover</div>
+            <p style="font-size: 0.8125rem; color: var(--text-secondary); line-height: 1.45;">
+              Trigger: Municipal grid voltage drop or outage.<br>
+              Action: Synchronized 62.5 kVA silent diesel genset active. Auto-transfer switch engages within 8 seconds without sound drop.
+            </p>
+          </div>
+
+          <div style="background: var(--surface-subtle); padding: 1rem; border-left: 3px solid var(--status-red); border-radius: 2px;">
+            <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.25rem;">🚑 Medical & Safety First Response</div>
+            <p style="font-size: 0.8125rem; color: var(--text-secondary); line-height: 1.45;">
+              Trigger: Heat exhaustion, slip, or allergic reaction.<br>
+              Action: 2 certified on-site paramedics stationed at hospitality desk. Green corridor established to tertiary hospital 4.2 km away.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Operational Incident Log -->
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Live Incident Log</h2>
+            <div class="panel-subtitle">Real-time issue tracking and resolution ledger.</div>
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="openIncidentModal()">+ Log Incident</button>
+        </div>
+        <table class="table-clean">
+          <thead>
+            <tr>
+              <th>Logged At</th>
+              <th>Severity</th>
+              <th>Incident Title</th>
+              <th>Description</th>
+              <th>Resolution Status</th>
+            </tr>
+          </thead>
+          <tbody id="incidentsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 04. SCENARIO LAB (DECISION IMPACT ENGINE) -->
+    <section id="tabScenario" class="workspace-pane">
+      <div class="scenario-box">
+        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+          <div>
+            <h2 style="font-family: var(--font-serif); font-size: 1.25rem; font-weight: 700;">Simulate Decision Impact</h2>
+            <div style="font-size: 0.85rem; color: var(--text-muted);">
+              Preview changes to guest count, event date, and venue setting before committing. Triggers DAG downstream task invalidations.
+            </div>
+          </div>
+          <div class="range-display" id="simHeadcountVal">250</div>
+        </div>
+
+        <div class="range-row">
+          <div style="flex: 1;">
+            <label class="form-label">Guest Headcount Range (50 to 600)</label>
+            <input type="range" id="simHeadcountSlider" min="50" max="600" step="5" value="250" oninput="onHeadcountSliderChange(this.value)">
+          </div>
+
+          <div style="width: 160px;">
+            <label class="form-label">Venue Setting</label>
+            <select id="simSettingSelect" class="form-control">
+              <option value="outdoor">Outdoor Lawn</option>
+              <option value="indoor">Indoor Hall</option>
+              <option value="hybrid">Hybrid Canopy</option>
+            </select>
+          </div>
+
+          <div style="width: 160px;">
+            <label class="form-label">Event Date</label>
+            <input type="date" id="simDateInput" class="form-control">
+          </div>
+
+          <div style="display: flex; align-items: flex-end;">
+            <button class="btn btn-primary" style="height: 38px;" onclick="runScenarioSimulation()">
+              Compute Impact
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Simulation Summary Stats -->
+      <div id="simSummarySection" class="financial-strip" style="display: none; background: #ffffff; border: 1px solid var(--border-subtle); border-radius: 4px; margin-bottom: 1.5rem;">
+        <div class="fin-metric">
+          <span class="fin-label">Projected Spend Delta</span>
+          <span class="fin-value" id="simSpendDelta">₹0</span>
+        </div>
+        <div class="fin-divider"></div>
+
+        <div class="fin-metric">
+          <span class="fin-label">Simulated Solvency</span>
+          <span id="simSolvencyBadge" class="status-badge badge-green" style="margin-top: 0.2rem; width: fit-content;">SOLVENT</span>
+        </div>
+        <div class="fin-divider"></div>
+
+        <div class="fin-metric" style="flex: 1;">
+          <span class="fin-label">Trade-off Statement</span>
+          <span id="simTradeoffsText" style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.4;">-</span>
+        </div>
+
+        <div style="display: flex; align-items: center;">
+          <button class="btn btn-primary" onclick="commitScenarioAction()">
+            Commit as Scenario vNext
+          </button>
+        </div>
+      </div>
+
+      <!-- DAG Invalidation Callout -->
+      <div id="simDagCallout" class="callout callout-amber" style="display: none;">
+        <strong>DAG Operational Invalidation:</strong> Downstream dependencies will be reopened for re-verification:
+        <div id="simDagList" style="margin-top: 0.4rem; font-size: 0.8125rem;"></div>
+      </div>
+
+      <!-- Side-by-Side Line Item Diff Table -->
+      <div class="panel" id="simDiffCard" style="display: none;">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Line-Item Cost Differentials</h2>
+            <div class="panel-subtitle">Transparent comparison of baseline vs simulated quantities and total expenditure.</div>
+          </div>
+        </div>
+        <table class="table-clean">
+          <thead>
+            <tr>
+              <th>Line Item</th>
+              <th>Formula</th>
+              <th class="numeric">Base Qty</th>
+              <th class="numeric">New Qty</th>
+              <th class="numeric">Unit Cost</th>
+              <th class="numeric">Base Total</th>
+              <th class="numeric">New Total</th>
+              <th class="numeric">Paise Delta</th>
+            </tr>
+          </thead>
+          <tbody id="simDiffTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ================================================================ -->
+  <!-- MODALS -->
+  <!-- ================================================================ -->
+
+  <!-- 1. Create Event Modal -->
+  <div id="createEventModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-card-header">
+        <h3 style="font-family: var(--font-serif); font-size: 1.2rem; font-weight: 700;">Create New Celebration</h3>
+        <button class="btn btn-sm" onclick="closeModal('createEventModal')">✕</button>
+      </div>
+      <div class="modal-card-body">
+        <div class="form-group">
+          <label class="form-label">Event Title</label>
+          <input type="text" id="newEvtTitle" class="form-control" placeholder="e.g., Ananya & Rohan's Sangeet Celebration">
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Event Type</label>
+            <select id="newEvtType" class="form-control">
+              <option value="wedding">Wedding</option>
+              <option value="birthday">Birthday</option>
+              <option value="community">Community Festival</option>
+              <option value="anniversary">Anniversary</option>
+              <option value="corporate">Corporate Gala</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">City</label>
+            <input type="text" id="newEvtCity" class="form-control" placeholder="e.g., Udaipur">
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Event Date</label>
+            <input type="date" id="newEvtDate" class="form-control">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Start Time & Duration</label>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="time" id="newEvtStartTime" class="form-control" value="16:00">
+              <input type="number" id="newEvtDuration" class="form-control" value="5" min="1" max="72" placeholder="Hours">
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Venue Setting</label>
+            <select id="newEvtSetting" class="form-control">
+              <option value="outdoor">Outdoor Lawn</option>
+              <option value="indoor">Indoor Hall</option>
+              <option value="hybrid">Hybrid Canopy</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Expected Guest Headcount</label>
+            <input type="number" id="newEvtGuests" class="form-control" value="200" min="10" max="5000">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Target Budget (Rupees ₹)</label>
+          <input type="number" id="newEvtBudget" class="form-control" value="1000000" min="10000" step="50000">
+        </div>
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn" onclick="closeModal('createEventModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitCreateEvent()">Initialize Celebration</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. AI Vendor Quote Extractor Modal -->
+  <div id="quoteModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-card-header">
+        <div>
+          <h3 style="font-family: var(--font-serif); font-size: 1.2rem; font-weight: 700;">AI Vendor Quote Extractor</h3>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">Gemma 4 31B Cognitive Intelligence / Disclosed Heuristic Engine</div>
+        </div>
+        <button class="btn btn-sm" onclick="closeModal('quoteModal')">✕</button>
+      </div>
+      <div class="modal-card-body">
+        <div style="margin-bottom: 0.75rem; display: flex; align-items: baseline; gap: 0.5rem;">
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Load Verified Sample:</span>
+          <button class="btn btn-sm" onclick="loadSampleQuote(1)">Wedding Catering</button>
+          <button class="btn btn-sm" onclick="loadSampleQuote(2)">DJ & Truss Sound</button>
+          <button class="btn btn-sm" onclick="loadSampleQuote(3)">Mandap Floral Decor</button>
+        </div>
+
+        <textarea id="rawQuoteInput" class="form-control" style="min-height: 110px; font-size: 0.8125rem;" placeholder="Paste raw unstructured vendor quote from WhatsApp or email..."></textarea>
+
+        <div style="margin-top: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+          <button class="btn btn-primary" onclick="parseQuoteAction()">Extract Line Items</button>
+          <span id="aiParserStatus" style="font-size: 0.75rem; color: var(--text-muted);"></span>
+        </div>
+
+        <!-- Quote Review Section -->
+        <div id="quoteReviewSection" style="display: none; margin-top: 1.25rem; border-top: 1px solid var(--border-subtle); padding-top: 1rem;">
+          <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.5rem;">Review Extracted Terms Before Approval</div>
+          <div class="grid-2" style="font-size: 0.8125rem; margin-bottom: 0.75rem;">
+            <div><span style="color: var(--text-muted);">Vendor:</span> <strong id="revVendorName">-</strong></div>
+            <div><span style="color: var(--text-muted);">Category:</span> <strong id="revCategory">-</strong></div>
+            <div><span style="color: var(--text-muted);">Deposit Required:</span> <strong id="revAdvance" style="color: var(--status-amber);">-</strong></div>
+            <div><span style="color: var(--text-muted);">Deposit Due:</span> <strong id="revDueDate">-</strong></div>
+          </div>
+
+          <table class="table-clean" style="margin-bottom: 0.75rem;">
+            <thead>
+              <tr>
+                <th>Extracted Item</th>
+                <th>Model</th>
+                <th class="numeric">Unit Cost</th>
+                <th class="numeric">Tax %</th>
+              </tr>
+            </thead>
+            <tbody id="revItemsTableBody"></tbody>
+          </table>
+
+          <div id="revClausesBox" class="callout callout-amber" style="display: none;">
+            <strong>⚠️ Explicit Hidden Fee Clauses Extracted:</strong>
+            <div id="revClausesList" style="margin-top: 0.25rem;"></div>
+          </div>
+
+          <div style="background: var(--surface-subtle); padding: 0.75rem; border-radius: 4px; font-size: 0.8rem;">
+            <div style="font-weight: 600; color: var(--text-muted); margin-bottom: 0.2rem;">Counter-Negotiation Script:</div>
+            <div id="revNegotiationReply" style="font-style: italic;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn" onclick="closeModal('quoteModal')">Cancel</button>
+        <button id="btnApproveQuote" class="btn btn-primary" style="display: none;" onclick="approveQuoteAction()">
+          Approve & Add to Ledger
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Record Payment Modal -->
+  <div id="paymentModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-card-header">
+        <h3 style="font-family: var(--font-serif); font-size: 1.2rem; font-weight: 700;">Record Actual Cash Payment</h3>
+        <button class="btn btn-sm" onclick="closeModal('paymentModal')">✕</button>
+      </div>
+      <div class="modal-card-body">
+        <div class="form-group">
+          <label class="form-label">Payment Amount (Rupees ₹)</label>
+          <input type="number" id="payAmountRs" class="form-control" placeholder="e.g., 50000" min="1">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Payment Method</label>
+          <select id="payMethod" class="form-control">
+            <option value="BANK_TRANSFER_NEFT">Bank Transfer / NEFT</option>
+            <option value="UPI">UPI / Instant Transfer</option>
+            <option value="CHEQUE">Bank Cheque</option>
+            <option value="CASH">Cash Voucher</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Reference Note / Transaction Number</label>
+          <input type="text" id="payReference" class="form-control" placeholder="e.g., NEFT Txn #928192 — Catering token advance">
+        </div>
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn" onclick="closeModal('paymentModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitRecordPayment()">Commit Payment to Ledger</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Log Incident Modal -->
+  <div id="incidentModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-card-header">
+        <h3 style="font-family: var(--font-serif); font-size: 1.2rem; font-weight: 700;">Log Operational Incident</h3>
+        <button class="btn btn-sm" onclick="closeModal('incidentModal')">✕</button>
+      </div>
+      <div class="modal-card-body">
+        <div class="form-group">
+          <label class="form-label">Severity Level</label>
+          <select id="incSeverity" class="form-control">
+            <option value="LOW">Low (Informational / Minor Delay)</option>
+            <option value="MEDIUM" selected>Medium (Operational Adjustment)</option>
+            <option value="HIGH">High (Vendor Default / Weather Threat)</option>
+            <option value="CRITICAL">Critical (Immediate Evacuation / Emergency)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Incident Title</label>
+          <input type="text" id="incTitle" class="form-control" placeholder="e.g., Sudden wind gust displaced lawn floral archway">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Operational Description</label>
+          <textarea id="incDesc" class="form-control" style="min-height: 80px;" placeholder="Describe what happened, timestamp, and affected guests/crew..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Resolution / Action Taken (Optional)</label>
+          <input type="text" id="incResolution" class="form-control" placeholder="e.g., Transferred under covered portico with crew reinforcement in 15 mins">
+        </div>
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn" onclick="closeModal('incidentModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitIncident()">Log Incident</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Revert Scenario Modal -->
+  <div id="revertModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-card-header">
+        <h3 style="font-family: var(--font-serif); font-size: 1.2rem; font-weight: 700;">Revert to Previous Scenario Revision</h3>
+        <button class="btn btn-sm" onclick="closeModal('revertModal')">✕</button>
+      </div>
+      <div class="modal-card-body">
+        <div class="callout callout-amber">
+          <strong>Safe Non-Destructive Revert:</strong> Reverting creates a new forward scenario revision that restores line items and parameters from the chosen version. Payment records, commitments, and historical logs are strictly preserved.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Select Target Version to Restore</label>
+          <select id="revertVersionSelect" class="form-control"></select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Concrete Reason for Reverting</label>
+          <input type="text" id="revertReasonInput" class="form-control" placeholder="e.g., Client decided against guest expansion back to original headcount">
+        </div>
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn" onclick="closeModal('revertModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitRevert()">Create Revert Revision</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
