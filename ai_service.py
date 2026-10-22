@@ -6,13 +6,16 @@ and honest, transparent offline heuristic fallback.
 """
 
 import json
+import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -21,11 +24,10 @@ except ImportError:
 try:
     from google import genai
     from google.genai import types
-    from google.genai.errors import APIError
+
     HAS_GENAI_LIB = True
 except ImportError:
     HAS_GENAI_LIB = False
-    APIError = Exception
 
 
 # Configurable model identifier: defaults to Gemma 4 31B (gemma-4-31b-it)
@@ -42,9 +44,11 @@ class ExtractedLineItem(BaseModel):
     pricing_model: str = Field(description="Must be 'FIXED', 'PER_CAPITA', or 'STEP_TIERED'")
     unit_cost_paise: int = Field(..., ge=0)
     step_capacity: int = Field(1, ge=1)
-    tax_rate_bps: int = Field(0, ge=0, le=10000, description="Tax rate in basis points, e.g. 1800 for 18% GST")
+    tax_rate_bps: int = Field(
+        0, ge=0, le=10000, description="Tax rate in basis points, e.g. 1800 for 18% GST"
+    )
     is_tax_inclusive: bool = False
-    notes: Optional[str] = None
+    notes: str | None = None
 
     @field_validator("pricing_model")
     @classmethod
@@ -58,15 +62,15 @@ class ExtractedLineItem(BaseModel):
 class ParsedQuoteResult(BaseModel):
     vendor_name: str = Field(..., max_length=120)
     category: str = Field(..., max_length=60)
-    extracted_items: List[ExtractedLineItem]
+    extracted_items: list[ExtractedLineItem]
     advance_deposit_paise: int = Field(0, ge=0)
-    deposit_due_date: Optional[str] = None
-    explicit_clauses_extracted: List[str] = Field(default_factory=list)
-    suggested_clarification_questions: List[str] = Field(default_factory=list)
+    deposit_due_date: str | None = None
+    explicit_clauses_extracted: list[str] = Field(default_factory=list)
+    suggested_clarification_questions: list[str] = Field(default_factory=list)
     suggested_negotiation_reply: str = Field("", max_length=1000)
 
 
-def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150) -> Dict[str, Any]:
+def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150) -> dict[str, Any]:
     """
     Parses messy vendor communications into structured line items.
     1. Enforces strict input bounds and sanitization.
@@ -89,8 +93,12 @@ def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150)
     if api_key and HAS_GENAI_LIB:
         client = None
         try:
-            client = genai.Client(api_key=api_key, http_options=types.HttpOptions(
-                timeout=20000, retry_options=types.HttpRetryOptions(attempts=1)))
+            client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(
+                    timeout=20000, retry_options=types.HttpRetryOptions(attempts=1)
+                ),
+            )
             system_prompt = (
                 "You are an expert event auditor. Parse the raw vendor communication into structured line items. "
                 "CRITICAL RULES:\n"
@@ -128,9 +136,9 @@ def parse_vendor_quote_text(raw_quote_text: str, current_guest_count: int = 150)
                 "review_status": "PENDING_HUMAN_REVIEW",
                 "data": validated.model_dump(),
             }
-        except Exception as e:
-            # Fall back honestly to heuristic parser
-            pass
+        except Exception as error:
+            # Provider/validation failure is recoverable; do not log quote contents or credentials.
+            logging.getLogger(__name__).warning("Quote provider fallback: %s", type(error).__name__)
         finally:
             if client is not None:
                 client.close()
@@ -203,11 +211,17 @@ def _classify_service_status(service_pattern: str, text: str) -> str:
             return "EXCLUDED"
         elif has_pos and has_neg:
             # Resolving combinations: "diesel included at no extra charge" -> INCLUDED
-            if re.search(r"\bno\s+(?:extra\s+charge|surcharge)\b", c_clean) or re.search(r"\bincluded\s+at\s+no\s+extra\b", c_clean):
+            if re.search(r"\bno\s+(?:extra\s+charge|surcharge)\b", c_clean) or re.search(
+                r"\bincluded\s+at\s+no\s+extra\b", c_clean
+            ):
                 return "INCLUDED"
             if re.search(r"\bnot\s+included\b", c_clean):
                 return "EXCLUDED"
-            return "INCLUDED" if ("included" in c_clean or "waived" in c_clean or "free" in c_clean) else "EXCLUDED"
+            return (
+                "INCLUDED"
+                if ("included" in c_clean or "waived" in c_clean or "free" in c_clean)
+                else "EXCLUDED"
+            )
 
     return "UNSPECIFIED"
 
@@ -219,10 +233,14 @@ def _is_service_included(concept_pattern: str, text: str) -> bool:
 
 def _is_advance_label(label: str) -> bool:
     """Returns True if the label describes an advance deposit rather than a purchased line item."""
-    return bool(re.search(r"\b(?:advance|deposit|token|booking\s+amount|down\s+payment)\b", label, re.IGNORECASE))
+    return bool(
+        re.search(
+            r"\b(?:advance|deposit|token|booking\s+amount|down\s+payment)\b", label, re.IGNORECASE
+        )
+    )
 
 
-def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
+def _heuristic_quote_parser(text: str, guests: int) -> dict[str, Any]:
     """
     Deterministic regex-based heuristic extractor for offline verification and testing.
     Never pretends to be live AI; extracts observable figures from text.
@@ -233,7 +251,11 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
     4. Unconfirmed pricing ('price to be confirmed' / 'TBD' tagged with PRICE_UNCONFIRMED).
     """
     # Detect vendor name
-    vendor_match = re.search(r"(?:this is|from|regards,?|team|vendor:?)\s+([A-Z][A-Za-z0-9\s&]{2,40}?)(?:[.,\n]|\s+catering|\s+productions|\s+sound|$)", text, re.IGNORECASE)
+    vendor_match = re.search(
+        r"(?:this is|from|regards,?|team|vendor:?)\s+([A-Z][A-Za-z0-9\s&]{2,40}?)(?:[.,\n]|\s+catering|\s+productions|\s+sound|$)",
+        text,
+        re.IGNORECASE,
+    )
     prefix_match = re.search(r"^([A-Z][A-Za-z0-9\s&]{2,40}?):", text.strip())
     if vendor_match:
         vendor_name = vendor_match.group(1).strip()
@@ -245,7 +267,9 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
     # Detect category
     category = "General Logistics"
     low = text.lower()
-    if any(k in low for k in ["cater", "thali", "food", "buffet", "plate", "pax", "dal baati", "snack"]):
+    if any(
+        k in low for k in ["cater", "thali", "food", "buffet", "plate", "pax", "dal baati", "snack"]
+    ):
         category = "Catering"
     elif any(k in low for k in ["dj", "sound", "light", "truss", "music", "audio", "speaker"]):
         category = "Entertainment"
@@ -264,25 +288,33 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
         tax_bps = int(round(tax_pct * 100))
 
     is_tax_inclusive = bool(
-        re.search(r"(?:including|inclusive\s+of|incl\.?|all[- ]inclusive)\s+(?:\d+(?:\.\d+)?\s*%\s*)?gst", low) or
-        re.search(r"gst\s+(?:included|inclusive)", low)
+        re.search(
+            r"(?:including|inclusive\s+of|incl\.?|all[- ]inclusive)\s+(?:\d+(?:\.\d+)?\s*%\s*)?gst",
+            low,
+        )
+        or re.search(r"gst\s+(?:included|inclusive)", low)
     )
 
     # Check for unconfirmed price markers
     is_unconfirmed_text = bool(
-        re.search(r"\b(?:to be confirmed|tbd|on request|to be discussed|pending confirmation|rates on call|price unconfirmed)\b", low)
+        re.search(
+            r"\b(?:to be confirmed|tbd|on request|to be discussed|pending confirmation|rates on call|price unconfirmed)\b",
+            low,
+        )
     )
 
     # 1. Detect per-person pricing
-    per_person_match = re.search(r"(?:rs\.?|inr|₹)\s*(\d[\d,]*)\s*(?:per\s+(?:person|pax|guest|head|plate)|\/-\s*per)", low)
-    items: List[ExtractedLineItem] = []
+    per_person_match = re.search(
+        r"(?:rs\.?|inr|₹)\s*(\d[\d,]*)\s*(?:per\s+(?:person|pax|guest|head|plate)|\/-\s*per)", low
+    )
+    items: list[ExtractedLineItem] = []
     extracted_advance_paise = 0
 
     if per_person_match:
         raw_unit_rupees = int(per_person_match.group(1).replace(",", ""))
         raw_paise = raw_unit_rupees * 100
         if is_tax_inclusive and tax_bps > 0:
-            note = f"Tax-inclusive quote (Gross ₹{raw_unit_rupees:,.2f} incl. {tax_bps/100:.1f}% GST)"
+            note = f"Tax-inclusive quote (Gross ₹{raw_unit_rupees:,.2f} incl. {tax_bps / 100:.1f}% GST)"
             is_incl = True
         else:
             note = None
@@ -302,7 +334,11 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
         total_estimated_paise = raw_paise * max(1, guests)
     else:
         # 2. Parse multi-item matches while strictly filtering out advance deposits
-        item_matches = list(re.finditer(r"([A-Za-z0-9\s&]{3,40}?)\s*(?:rs\.?|inr|₹)\s*([\d,]+)", text, re.IGNORECASE))
+        item_matches = list(
+            re.finditer(
+                r"([A-Za-z0-9\s&]{3,40}?)\s*(?:rs\.?|inr|₹)\s*([\d,]+)", text, re.IGNORECASE
+            )
+        )
         filtered_matches = []
         for m in item_matches:
             lbl = m.group(1).strip()
@@ -319,7 +355,7 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
             for lbl, amt in filtered_matches:
                 gross_paise = amt * 100
                 if is_tax_inclusive and tax_bps > 0:
-                    note = f"Tax-inclusive quote (Gross ₹{amt:,.2f} incl. {tax_bps/100:.1f}% GST)"
+                    note = f"Tax-inclusive quote (Gross ₹{amt:,.2f} incl. {tax_bps / 100:.1f}% GST)"
                     is_incl = True
                 else:
                     note = None
@@ -340,12 +376,14 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
         else:
             # Fallback for flat amounts or unconfirmed quotes
             amounts = re.findall(r"(?:rs\.?|inr|₹)\s*(\d[\d,]*)", low)
-            clean_amts = [int(a.replace(",", "")) for a in amounts if int(a.replace(",", "")) >= 500]
+            clean_amts = [
+                int(a.replace(",", "")) for a in amounts if int(a.replace(",", "")) >= 500
+            ]
 
             if clean_amts and not is_unconfirmed_text:
                 gross_paise = clean_amts[0] * 100
                 if is_tax_inclusive and tax_bps > 0:
-                    note = f"Tax-inclusive quote (Gross ₹{clean_amts[0]:,.2f} incl. {tax_bps/100:.1f}% GST)"
+                    note = f"Tax-inclusive quote (Gross ₹{clean_amts[0]:,.2f} incl. {tax_bps / 100:.1f}% GST)"
                     is_incl = True
                 else:
                     note = None
@@ -384,12 +422,16 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
         advance_paise = extracted_advance_paise
     else:
         # Check percentage advance against total quoted gross
-        pct_adv_match = re.search(r"(\d{1,2})\s*%\s*(?:advance|deposit|token)", low) or re.search(r"(?:advance|token|deposit)(?:\s+is|\s+of)?\s*(\d{1,2})\s*%", low)
+        pct_adv_match = re.search(r"(\d{1,2})\s*%\s*(?:advance|deposit|token)", low) or re.search(
+            r"(?:advance|token|deposit)(?:\s+is|\s+of)?\s*(\d{1,2})\s*%", low
+        )
         if pct_adv_match:
             pct = int(pct_adv_match.group(1))
             advance_paise = (total_estimated_paise * pct) // 100
         else:
-            adv_match = re.search(r"(?:advance|token|deposit)(?:\s+is|\s+of)?\s*(?:rs\.?|inr|₹)\s*(\d[\d,]*)", low)
+            adv_match = re.search(
+                r"(?:advance|token|deposit)(?:\s+is|\s+of)?\s*(?:rs\.?|inr|₹)\s*(\d[\d,]*)", low
+            )
             if adv_match:
                 advance_paise = int(adv_match.group(1).replace(",", "")) * 100
 
@@ -404,7 +446,9 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
     # Diesel / Kitchen fuel
     diesel_st = _classify_service_status(r"diesel|fuel", low)
     if diesel_st == "INCLUDED":
-        clauses.append("Kitchen fuel and generator diesel explicitly included in quote (no surcharge).")
+        clauses.append(
+            "Kitchen fuel and generator diesel explicitly included in quote (no surcharge)."
+        )
     elif diesel_st == "EXCLUDED":
         clauses.append("Kitchen fuel and generator diesel charged separately as surcharge.")
 
@@ -432,17 +476,21 @@ def _heuristic_quote_parser(text: str, guests: int) -> Dict[str, Any]:
     # Questions & negotiation reply
     questions = [
         "Does the quoted total include full setup, breakdown, and disposal fees?",
-        f"Can you provide a line-item tax breakdown matching the quoted {tax_bps/100:.1f}% GST rate?",
+        f"Can you provide a line-item tax breakdown matching the quoted {tax_bps / 100:.1f}% GST rate?",
     ]
     if category == "Catering":
-        questions.append("Are guest tasting sessions, ceramic crockery, and serving staff included?")
+        questions.append(
+            "Are guest tasting sessions, ceramic crockery, and serving staff included?"
+        )
     if total_estimated_paise == 0:
-        questions.append(f"Item pricing was not specified in the quote. Please confirm the rate for {category} before final commitment.")
+        questions.append(
+            f"Item pricing was not specified in the quote. Please confirm the rate for {category} before final commitment."
+        )
 
     negotiation_script = (
         f"Hi {vendor_name}, thank you for sending over the quote for {category}. "
         f"We are evaluating options for {guests} guests. Before locking in the agreement, "
-        f"could you confirm if the {tax_bps/100:.1f}% GST and setup logistics are all-inclusive?"
+        f"could you confirm if the {tax_bps / 100:.1f}% GST and setup logistics are all-inclusive?"
     )
 
     return {

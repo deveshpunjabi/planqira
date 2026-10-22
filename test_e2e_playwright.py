@@ -1,14 +1,15 @@
 """Browser regressions using a temporary database and an automatically managed server."""
+
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 import pytest
-from playwright.sync_api import sync_playwright, expect
+from playwright.sync_api import expect, sync_playwright
 
 
 @pytest.fixture(scope="module")
@@ -18,9 +19,30 @@ def server(tmp_path_factory):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    env = dict(os.environ, PLANQIRA_DB_PATH=str(sandbox / "events.db"), GEMINI_API_KEY="", GOOGLE_API_KEY="", DATABASE_URL="")
+    env = dict(
+        os.environ,
+        PLANQIRA_DB_PATH=str(sandbox / "events.db"),
+        GEMINI_API_KEY="",
+        GOOGLE_API_KEY="",
+        DATABASE_URL="",
+    )
     with (sandbox / "server.log").open("w") as log:
-        process = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)], cwd=root, env=env, stdout=log, stderr=log)
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            cwd=root,
+            env=env,
+            stdout=log,
+            stderr=log,
+        )
         base = f"http://127.0.0.1:{port}"
         try:
             for _ in range(100):
@@ -30,7 +52,7 @@ def server(tmp_path_factory):
                     with urllib.request.urlopen(base + "/api/health", timeout=1):
                         break
                 except OSError:
-                    time.sleep(.1)
+                    time.sleep(0.1)
             else:
                 pytest.fail("Preview server did not become ready")
             yield base
@@ -71,9 +93,17 @@ def open_dashboard(page, server):
     expect(page.locator("#headerEventTitle")).not_to_contain_text("Loading")
 
 
+def test_dashboard_form_labels_resolve_to_controls(page, server):
+    open_dashboard(page, server)
+    assert page.locator("label.form-label[for]").count() >= 21
+    assert page.locator("label.form-label[for]").evaluate_all(
+        "labels => labels.every(label => label.control !== null)"
+    )
+
+
 def test_homepage_and_dashboard_routes(page, server):
     page.goto(server)
-    expect(page).to_have_title(__import__('re').compile("Planqira"))
+    expect(page).to_have_title(__import__("re").compile("Planqira"))
     expect(page.locator("a[href='/dashboard']").first).to_be_visible()
     open_dashboard(page, server)
     expect(page.locator("#upcomingTasks .task-preview")).to_have_count(3)
@@ -99,14 +129,20 @@ def test_navigation_and_context_survive_refresh(page, server):
 
 
 def test_loading_error_retry_and_empty_states(page, server):
-    page.route("**/api/events", lambda route: route.fulfill(status=503, content_type="application/json", body='{}'))
+    page.route(
+        "**/api/events",
+        lambda route: route.fulfill(status=503, content_type="application/json", body="{}"),
+    )
     page.goto(server + "/dashboard")
     expect(page.locator("#loadError")).to_be_visible()
     page.unroute("**/api/events")
     page.get_by_role("button", name="Try again", exact=True).click()
     expect(page.locator("#loadError")).to_be_hidden()
     expect(page.locator("#headerEventTitle")).to_be_visible()
-    page.route("**/api/events", lambda route: route.fulfill(content_type="application/json", body='{"events":[]}'))
+    page.route(
+        "**/api/events",
+        lambda route: route.fulfill(content_type="application/json", body='{"events":[]}'),
+    )
     page.reload()
     expect(page.locator("#emptyState")).to_be_visible()
     expect(page.locator("#workspaceMain")).to_be_hidden()
@@ -135,7 +171,9 @@ def test_quote_review_and_modal_focus(page, server):
     page.locator("#workspaceAction").click()
     modal = page.locator("#quoteModal")
     expect(modal).to_have_attribute("role", "dialog")
-    page.locator("#rawQuoteInput").fill("Royal Sound & Stage Setup: Grand banquet stage ₹1,20,000, Acoustic line-array ₹60,000. Diesel included. No corkage fee. 30% advance deposit due by 2026-11-05.")
+    page.locator("#rawQuoteInput").fill(
+        "Royal Sound & Stage Setup: Grand banquet stage ₹1,20,000, Acoustic line-array ₹60,000. Diesel included. No corkage fee. 30% advance deposit due by 2026-11-05."
+    )
     page.get_by_role("button", name="Read quote", exact=True).click()
     expect(page.locator("#quoteReviewSection")).to_be_visible()
     expect(page.locator("#revAdvance")).to_contain_text("54,000")
@@ -161,7 +199,10 @@ def test_payment_updates_cash_and_survives_refresh(page, server):
     expect(page.locator("#paymentModal")).to_be_hidden()
     expect(page.locator("#finPaid")).not_to_have_text(before)
     after = page.locator("#finPaid").inner_text()
-    money = lambda text: float(text.replace('₹', '').replace(',', ''))
+
+    def money(text):
+        return float(text.replace("₹", "").replace(",", ""))
+
     assert money(after) - money(before) == 100
     page.reload()
     expect(page.locator("#finPaid")).to_have_text(after)
@@ -170,9 +211,13 @@ def test_payment_updates_cash_and_survives_refresh(page, server):
 
 def test_payment_retry_after_lost_response_does_not_duplicate_cash(page, server):
     open_dashboard(page, server)
-    money = lambda text: float(text.replace('₹', '').replace(',', ''))
+
+    def money(text):
+        return float(text.replace("₹", "").replace(",", ""))
+
     before = money(page.locator("#finPaid").inner_text())
     attempts = []
+
     def lose_first_response(route):
         attempts.append(route.request.post_data_json)
         if len(attempts) == 1:
@@ -181,6 +226,7 @@ def test_payment_retry_after_lost_response_does_not_duplicate_cash(page, server)
             route.abort("failed")
         else:
             route.continue_()
+
     page.route("**/record-payment", lose_first_response)
     page.locator("#navBtnBudget").click()
     page.get_by_role("button", name="Record Payment", exact=True).click()
@@ -211,7 +257,10 @@ def test_quote_price_edit_and_explicit_replacement_persist(page, server):
     assert response.value.ok
     expect(page.locator("#quoteModal")).to_be_hidden()
     after = page.request.get(f"{server}/api/events/{event_id}").json()
-    assert after["solvency"]["total_projected_paise"] - before["solvency"]["total_projected_paise"] == 90000 * before["event"]["guest_count"]
+    assert (
+        after["solvency"]["total_projected_paise"] - before["solvency"]["total_projected_paise"]
+        == 90000 * before["event"]["guest_count"]
+    )
     assert after["solvency"]["total_paid_paise"] == before["solvency"]["total_paid_paise"]
 
 
@@ -240,17 +289,26 @@ def test_responsive_navigation_and_no_page_overflow(page, server, width):
     expect(page.locator("#tabBudget")).to_be_visible()
     if width < 761:
         expect(page.locator("#sidebarBackdrop")).to_be_hidden()
-    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Page overflows viewport"
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), (
+        "Page overflows viewport"
+    )
     assert page.locator("#budgetTableBody tr").count() > 0
-    for metric in page.locator('.fin-value:visible').all():
-        assert metric.evaluate('e => e.clientHeight >= e.scrollHeight'), 'Financial value is clipped'
+    for metric in page.locator(".fin-value:visible").all():
+        assert metric.evaluate("e => e.clientHeight >= e.scrollHeight"), (
+            "Financial value is clipped"
+        )
     if os.getenv("PLANQIRA_SCREENSHOT_DIR"):
         if width < 761:
             page.locator("#sidebarToggle").click()
         page.locator("#navBtnOverview").click()
         page.evaluate("window.scrollTo(0, 0)")
         page.emulate_media(reduced_motion="reduce")
-        page.screenshot(path=str(Path(os.environ["PLANQIRA_SCREENSHOT_DIR"]) / f"planqira-dashboard-{width}.png"), full_page=False)
+        page.screenshot(
+            path=str(
+                Path(os.environ["PLANQIRA_SCREENSHOT_DIR"]) / f"planqira-dashboard-{width}.png"
+            ),
+            full_page=False,
+        )
 
 
 def test_guide_reduced_motion_and_exports(page, server):
@@ -265,4 +323,7 @@ def test_guide_reduced_motion_and_exports(page, server):
     assert csv.status == 200 and "Event Title" in csv.text()
     ics = page.request.get(server + f"/api/events/{event}/export.ics")
     assert ics.status == 200 and "BEGIN:VCALENDAR" in ics.text()
-    assert page.locator("body").evaluate("e => getComputedStyle(e).backgroundColor") == "rgb(247, 246, 242)"
+    assert (
+        page.locator("body").evaluate("e => getComputedStyle(e).backgroundColor")
+        == "rgb(247, 246, 242)"
+    )

@@ -37,6 +37,7 @@ venv.bak/
 # Testing, Coverage & Playwright
 # ==============================================================================
 .pytest_cache/
+.ruff_cache/
 .coverage
 .coverage.*
 .cache

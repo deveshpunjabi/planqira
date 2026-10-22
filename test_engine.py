@@ -6,23 +6,15 @@ double-counting prevention, stale scenario rejection, DAG invalidations,
 safe reverts, CSV formula sanitization, RFC-5545 ICS calendar, and Gemma 4 model support.
 """
 
-import os
 import pytest
 from fastapi.testclient import TestClient
 
-from engine import (
-    calculate_tax_paise,
-    compute_line_item_paise,
-    evaluate_event_solvency,
-    DependencyDAG,
-    simulate_scenario_impact,
-)
+from ai_service import get_active_model, parse_vendor_quote_text
 from database import (
     approve_vendor_quote_in_db,
     commit_scenario_version,
     create_event,
     create_incident,
-    get_connection,
     get_event_by_id,
     init_db,
     list_events,
@@ -30,13 +22,18 @@ from database import (
     record_payment,
     revert_scenario_version,
 )
-from ai_service import get_active_model, parse_vendor_quote_text
+from engine import (
+    calculate_tax_paise,
+    compute_line_item_paise,
+    evaluate_event_solvency,
+)
+from exports import _fold_ics_line
 from main import app
-
 
 # =====================================================================
 # 1. DATABASE ISOLATION FIXTURE (Runs on Every Test)
 # =====================================================================
+
 
 @pytest.fixture(autouse=True)
 def isolate_test_database(tmp_path, monkeypatch):
@@ -57,6 +54,7 @@ def client():
 # =====================================================================
 # 2. FINANCIAL MATHEMATICS & FORMULA TESTS
 # =====================================================================
+
 
 def test_tax_and_contingency_half_up_rounding():
     # 1800 bps = 18.00%
@@ -95,12 +93,16 @@ def test_compute_line_item_paise_models():
 
     # STEP_TIERED: integer ceiling division
     # 250 guests / capacity 50 -> 5 units
-    res_tier1 = compute_line_item_paise("STEP_TIERED", 1200000, guest_count=250, step_capacity=50, tax_rate_bps=0)
+    res_tier1 = compute_line_item_paise(
+        "STEP_TIERED", 1200000, guest_count=250, step_capacity=50, tax_rate_bps=0
+    )
     assert res_tier1["quantity"] == 5
     assert res_tier1["total_paise"] == 6000000
 
     # 251 guests / capacity 50 -> 6 units (step jump)
-    res_tier2 = compute_line_item_paise("STEP_TIERED", 1200000, guest_count=251, step_capacity=50, tax_rate_bps=0)
+    res_tier2 = compute_line_item_paise(
+        "STEP_TIERED", 1200000, guest_count=251, step_capacity=50, tax_rate_bps=0
+    )
     assert res_tier2["quantity"] == 6
     assert res_tier2["total_paise"] == 7200000
 
@@ -138,9 +140,17 @@ def test_evaluate_solvency_deficit_detection():
     # Total required = 5,000,000 + 60,000,000 = 65,000,000 paise.
     # Budget variance = -15,000,000 paise -> Solvency: DEFICIT
     items = [
-        {"name": "Luxury Space", "pricing_model": "FIXED", "unit_cost_paise": 60000000, "tax_rate_bps": 0, "approval_state": "APPROVED"}
+        {
+            "name": "Luxury Space",
+            "pricing_model": "FIXED",
+            "unit_cost_paise": 60000000,
+            "tax_rate_bps": 0,
+            "approval_state": "APPROVED",
+        }
     ]
-    solv = evaluate_event_solvency(target_budget_paise=50000000, contingency_bps=1000, line_items=items, guest_count=100)
+    solv = evaluate_event_solvency(
+        target_budget_paise=50000000, contingency_bps=1000, line_items=items, guest_count=100
+    )
     assert solv["solvency_status"] == "DEFICIT"
     assert solv["variance_paise"] == -15000000
     assert solv["remaining_budget_paise"] == 0
@@ -151,13 +161,25 @@ def test_evaluate_solvency_deficit_detection():
 # 3. QUOTE APPROVAL, PAYMENTS & DOUBLE-COUNTING PREVENTION TESTS
 # =====================================================================
 
+
 def test_quote_approval_multi_item_and_unique_ids():
     evts = list_events()
     evt_id = evts[0]["id"]
 
     items_to_approve = [
-        {"name": "Intelligent Moving Heads", "pricing_model": "FIXED", "unit_cost_paise": 5000000, "tax_rate_bps": 1800},
-        {"name": "LED Floor Par Canisters", "pricing_model": "STEP_TIERED", "unit_cost_paise": 100000, "step_capacity": 25, "tax_rate_bps": 1800},
+        {
+            "name": "Intelligent Moving Heads",
+            "pricing_model": "FIXED",
+            "unit_cost_paise": 5000000,
+            "tax_rate_bps": 1800,
+        },
+        {
+            "name": "LED Floor Par Canisters",
+            "pricing_model": "STEP_TIERED",
+            "unit_cost_paise": 100000,
+            "step_capacity": 25,
+            "tax_rate_bps": 1800,
+        },
     ]
 
     res = approve_vendor_quote_in_db(
@@ -185,7 +207,14 @@ def test_quote_approval_separates_deposit_from_payment():
         event_id=evt_id,
         vendor_name="Royal Brass Shehnai Band",
         category="Live Music",
-        items=[{"name": "4-Musician Folk Ensemble", "pricing_model": "FIXED", "unit_cost_paise": 8000000, "tax_rate_bps": 1800}],
+        items=[
+            {
+                "name": "4-Musician Folk Ensemble",
+                "pricing_model": "FIXED",
+                "unit_cost_paise": 8000000,
+                "tax_rate_bps": 1800,
+            }
+        ],
         advance_deposit_paise=3000000,
         deposit_due_date="2026-11-01",
     )
@@ -207,7 +236,15 @@ def test_record_payment_updates_ledger_and_balances():
         event_id=evt_id,
         vendor_name="Heritage Transport Coaches",
         category="Logistics",
-        items=[{"name": "50-Seater AC Bus", "pricing_model": "STEP_TIERED", "unit_cost_paise": 1500000, "step_capacity": 50, "tax_rate_bps": 0}],
+        items=[
+            {
+                "name": "50-Seater AC Bus",
+                "pricing_model": "STEP_TIERED",
+                "unit_cost_paise": 1500000,
+                "step_capacity": 50,
+                "tax_rate_bps": 0,
+            }
+        ],
         advance_deposit_paise=1500000,
     )
     com_id = res_app["commitment_id"]
@@ -239,21 +276,36 @@ def test_quote_replacement_eliminates_double_counting():
     evts = list_events()
     evt_id = evts[0]["id"]
     initial_full = get_event_by_id(evt_id)
-    initial_cat_item = [it for it in initial_full["budget_items"] if it["category"] == "Catering" and it["approval_state"] == "ESTIMATED" or it["approval_state"] == "QUOTED"][0]
+    initial_cat_item = [
+        it
+        for it in initial_full["budget_items"]
+        if it["category"] == "Catering"
+        and it["approval_state"] == "ESTIMATED"
+        or it["approval_state"] == "QUOTED"
+    ][0]
 
     # Approve a real catering quote
     res = approve_vendor_quote_in_db(
         event_id=evt_id,
         vendor_name="Maharaja Banquet Kitchens",
         category="Catering",
-        items=[{"name": "Royal Feast Deluxe", "pricing_model": "PER_CAPITA", "unit_cost_paise": 180000, "tax_rate_bps": 500}],
+        items=[
+            {
+                "name": "Royal Feast Deluxe",
+                "pricing_model": "PER_CAPITA",
+                "unit_cost_paise": 180000,
+                "tax_rate_bps": 500,
+            }
+        ],
         advance_deposit_paise=5000000,
         supersedes_item_id=initial_cat_item["id"],
     )
     assert res["success"] is True
 
     updated_full = get_event_by_id(evt_id)
-    superseded_item = [it for it in updated_full["budget_items"] if it["id"] == initial_cat_item["id"]][0]
+    superseded_item = [
+        it for it in updated_full["budget_items"] if it["id"] == initial_cat_item["id"]
+    ][0]
 
     # The superseded estimated item must be marked REPLACED
     assert superseded_item["approval_state"] == "REPLACED"
@@ -265,7 +317,12 @@ def test_quote_replacement_eliminates_double_counting():
         line_items=updated_full["budget_items"],
         guest_count=updated_full["event"]["guest_count"],
     )
-    assert initial_cat_item["id"] not in [it["id"] for it in solvency["items"] if it["approval_state"] not in ("REJECTED", "REPLACED") and it["id"] == initial_cat_item["id"]]
+    assert initial_cat_item["id"] not in [
+        it["id"]
+        for it in solvency["items"]
+        if it["approval_state"] not in ("REJECTED", "REPLACED")
+        and it["id"] == initial_cat_item["id"]
+    ]
 
 
 def test_quote_approval_idempotency_retries():
@@ -273,7 +330,14 @@ def test_quote_approval_idempotency_retries():
     evt_id = evts[0]["id"]
     idem_key = "unique-retry-token-12345"
 
-    items = [{"name": "Floral Gate Arch", "pricing_model": "FIXED", "unit_cost_paise": 3000000, "tax_rate_bps": 1800}]
+    items = [
+        {
+            "name": "Floral Gate Arch",
+            "pricing_model": "FIXED",
+            "unit_cost_paise": 3000000,
+            "tax_rate_bps": 1800,
+        }
+    ]
 
     # First attempt
     res1 = approve_vendor_quote_in_db(
@@ -302,6 +366,7 @@ def test_quote_approval_idempotency_retries():
 # =====================================================================
 # 4. SCENARIO TRUSTWORTHINESS & DAG PROPAGATION TESTS
 # =====================================================================
+
 
 def test_stale_scenario_proposal_rejection():
     evts = list_events()
@@ -416,6 +481,7 @@ def test_scenario_revert_creates_forward_revision():
 # 5. CORE PLANNING EXPERIENCE & "CREATE EVENT" FLOW TESTS
 # =====================================================================
 
+
 def test_create_custom_event():
     evt_payload = {
         "title": "Aarav & Meera Destination Wedding",
@@ -490,6 +556,7 @@ def test_incident_logging_and_resolution():
 # 6. AI COGNITIVE INTEGRATION & SECURITY TESTS
 # =====================================================================
 
+
 def test_ai_model_configuration_and_quote_parsing():
     # Verifies active model configuration and fallback safety
     model = get_active_model()
@@ -518,6 +585,7 @@ def test_ai_quote_parsing_short_input_rejection():
 # =====================================================================
 # 7. EXPORT SECURITY & RFC CONFORMANCE TESTS
 # =====================================================================
+
 
 def test_csv_export_formula_injection_sanitization(client):
     evts = client.get("/api/events").json()["events"]
@@ -599,10 +667,7 @@ def test_simulation_endpoint_with_dag_invalidations(client):
     evts = client.get("/api/events").json()["events"]
     evt_id = evts[0]["id"]
 
-    sim_payload = {
-        "new_guests": 320,
-        "new_setting": "indoor"
-    }
+    sim_payload = {"new_guests": 320, "new_setting": "indoor"}
     response = client.post(f"/api/events/{evt_id}/simulate", json=sim_payload)
     assert response.status_code == 200
     data = response.json()
@@ -619,11 +684,22 @@ def test_simulation_endpoint_with_dag_invalidations(client):
 # 10. REGRESSION & AUDIT VERIFICATION TESTS
 # =====================================================================
 
+
 def test_payment_ledger_unallocated_and_allocated():
     """Verifies that payments ledger is the authoritative source of truth for cash paid."""
     line_items = [
-        {"id": "item-1", "pricing_model": "FIXED", "unit_cost_paise": 100000, "paid_amount_paise": 0},
-        {"id": "item-2", "pricing_model": "FIXED", "unit_cost_paise": 200000, "paid_amount_paise": 0},
+        {
+            "id": "item-1",
+            "pricing_model": "FIXED",
+            "unit_cost_paise": 100000,
+            "paid_amount_paise": 0,
+        },
+        {
+            "id": "item-2",
+            "pricing_model": "FIXED",
+            "unit_cost_paise": 200000,
+            "paid_amount_paise": 0,
+        },
     ]
     # 2 allocated payments and 1 unallocated payment
     payments = [
@@ -720,7 +796,7 @@ def test_cross_event_ownership_isolation(client):
             "payment_method": "NEFT",
             "reference_note": "Cross event attack",
             "commitment_id": comm_a_id,
-        }
+        },
     )
     assert pay_res.status_code == 400
     assert "not found for event" in pay_res.json()["detail"]
@@ -772,11 +848,13 @@ def test_rfc5545_exclusive_end_date_and_line_folding(client):
     for i, line in enumerate(lines):
         if line.startswith("DTSTART;VALUE=DATE:"):
             start_date_str = line.split(":")[1]
-            end_line = lines[i+1]
+            end_line = lines[i + 1]
             if end_line.startswith("DTEND;VALUE=DATE:"):
                 end_date_str = end_line.split(":")[1]
                 # Compare integer dates
-                assert int(end_date_str) > int(start_date_str), f"DTEND ({end_date_str}) must be after DTSTART ({start_date_str})"
+                assert int(end_date_str) > int(start_date_str), (
+                    f"DTEND ({end_date_str}) must be after DTSTART ({start_date_str})"
+                )
 
 
 def test_dietary_and_style_personalization_in_create_event():
@@ -791,7 +869,7 @@ def test_dietary_and_style_personalization_in_create_event():
         "preferences": {
             "dietary": "Strict Vegetarian + Jain",
             "style": "Regal Rajputana Heritage",
-        }
+        },
     }
     created = create_event(payload)
     evt_full = get_event_by_id(created["event_id"])
@@ -805,10 +883,10 @@ def test_dietary_and_style_personalization_in_create_event():
     assert "Pure Veg & Jain" in tasting_tasks[0]["title"]
 
 
-
 # =====================================================================
 # 11. REMEDIATION & ROBUSTNESS TESTS (Planqira vs UtsavAI Parity)
 # =====================================================================
+
 
 def test_server_owned_scenario_computation_rejects_forged_costs(client):
     """Verifies that client cannot forge budget line item costs when committing a scenario version."""
@@ -850,22 +928,26 @@ def test_server_owned_scenario_computation_rejects_forged_costs(client):
 
 def test_cross_event_replacement_rejected():
     """Verifies strict tenant isolation: Event A cannot supersede or alter items belonging to Event B."""
-    evt_a = create_event({
-        "title": "Event A Royal Wedding",
-        "event_type": "wedding",
-        "city": "Mumbai",
-        "event_date": "2026-11-10",
-        "guest_count": 100,
-        "target_budget_paise": 50000000,
-    })
-    evt_b = create_event({
-        "title": "Event B Corporate Gala",
-        "event_type": "corporate",
-        "city": "Bengaluru",
-        "event_date": "2026-11-20",
-        "guest_count": 100,
-        "target_budget_paise": 50000000,
-    })
+    evt_a = create_event(
+        {
+            "title": "Event A Royal Wedding",
+            "event_type": "wedding",
+            "city": "Mumbai",
+            "event_date": "2026-11-10",
+            "guest_count": 100,
+            "target_budget_paise": 50000000,
+        }
+    )
+    evt_b = create_event(
+        {
+            "title": "Event B Corporate Gala",
+            "event_type": "corporate",
+            "city": "Bengaluru",
+            "event_date": "2026-11-20",
+            "guest_count": 100,
+            "target_budget_paise": 50000000,
+        }
+    )
 
     full_b = get_event_by_id(evt_b["event_id"])
     item_b_id = full_b["budget_items"][0]["id"]
@@ -876,13 +958,15 @@ def test_cross_event_replacement_rejected():
             event_id=evt_a["event_id"],
             vendor_name="Malicious Vendor",
             category="Decor & Styling",
-            items=[{
-                "name": "Intrusive Decor",
-                "pricing_model": "FIXED",
-                "unit_cost_paise": 2000000,
-                "step_capacity": 1,
-                "tax_rate_bps": 1800,
-            }],
+            items=[
+                {
+                    "name": "Intrusive Decor",
+                    "pricing_model": "FIXED",
+                    "unit_cost_paise": 2000000,
+                    "step_capacity": 1,
+                    "tax_rate_bps": 1800,
+                }
+            ],
             supersedes_item_ids=[item_b_id],
         )
 
@@ -923,16 +1007,22 @@ def test_payment_idempotency_prevents_duplicate_charge(client):
     assert res_conflict.status_code == 409
 
     # Two deliberately separate payments without explicit idempotency keys both succeed independently
-    res_sep1 = client.post(f"/api/events/{evt_id}/record-payment", json={
-        "amount_paise": 50000,
-        "payment_method": "Cash",
-        "reference_note": "Cash tip 1",
-    })
-    res_sep2 = client.post(f"/api/events/{evt_id}/record-payment", json={
-        "amount_paise": 50000,
-        "payment_method": "Cash",
-        "reference_note": "Cash tip 2",
-    })
+    res_sep1 = client.post(
+        f"/api/events/{evt_id}/record-payment",
+        json={
+            "amount_paise": 50000,
+            "payment_method": "Cash",
+            "reference_note": "Cash tip 1",
+        },
+    )
+    res_sep2 = client.post(
+        f"/api/events/{evt_id}/record-payment",
+        json={
+            "amount_paise": 50000,
+            "payment_method": "Cash",
+            "reference_note": "Cash tip 2",
+        },
+    )
     assert res_sep1.status_code == 200 and res_sep1.json()["already_recorded"] is False
     assert res_sep2.status_code == 200 and res_sep2.json()["already_recorded"] is False
 
@@ -957,25 +1047,34 @@ def test_quote_parser_advance_not_counted_as_line_item():
 def test_quote_parser_negation_and_waivers_comprehensive():
     """Verifies comprehensive negation and waiver rules for diesel, corkage, transport, and overtime."""
     # 1. "No corkage fee"
-    p1 = parse_vendor_quote_text("Per person plate Rs 800. No corkage fee.", current_guest_count=100)
+    p1 = parse_vendor_quote_text(
+        "Per person plate Rs 800. No corkage fee.", current_guest_count=100
+    )
     clauses1 = " ".join(p1["data"]["explicit_clauses_extracted"]).lower()
     assert "corkage fee waived" in clauses1
     assert "corkage fee required" not in clauses1
 
     # 2. "Diesel included at no extra charge"
-    p2 = parse_vendor_quote_text("Sound truss setup Rs 50000. Diesel included at no extra charge.", current_guest_count=100)
+    p2 = parse_vendor_quote_text(
+        "Sound truss setup Rs 50000. Diesel included at no extra charge.", current_guest_count=100
+    )
     clauses2 = " ".join(p2["data"]["explicit_clauses_extracted"]).lower()
     assert "diesel explicitly included" in clauses2
     assert "diesel charged separately" not in clauses2
 
     # 3. "No surcharge for diesel"
-    p3 = parse_vendor_quote_text("DJ setup Rs 40000. No surcharge for diesel. Corkage fee required.", current_guest_count=100)
+    p3 = parse_vendor_quote_text(
+        "DJ setup Rs 40000. No surcharge for diesel. Corkage fee required.", current_guest_count=100
+    )
     clauses3 = " ".join(p3["data"]["explicit_clauses_extracted"]).lower()
     assert "diesel explicitly included" in clauses3
     assert "corkage fee required" in clauses3
 
     # 4. "Diesel not included. Outstation transport extra. Outside corkage fee waived."
-    p4 = parse_vendor_quote_text("Generator diesel not included. Outstation transport extra. Outside corkage fee waived.", current_guest_count=100)
+    p4 = parse_vendor_quote_text(
+        "Generator diesel not included. Outstation transport extra. Outside corkage fee waived.",
+        current_guest_count=100,
+    )
     clauses4 = " ".join(p4["data"]["explicit_clauses_extracted"]).lower()
     assert "diesel charged separately as surcharge" in clauses4
     assert "transport fees applicable" in clauses4
@@ -1010,21 +1109,25 @@ def test_quote_parser_tax_inclusive_exact_preservation_across_quantities():
             tax_rate_bps=item["tax_rate_bps"],
             is_tax_inclusive=True,
         )
-        assert calc["total_paise"] == expected_total, f"Failed for {q} guests: got {calc['total_paise']}, expected {expected_total}"
+        assert calc["total_paise"] == expected_total, (
+            f"Failed for {q} guests: got {calc['total_paise']}, expected {expected_total}"
+        )
         assert calc["subtotal_paise"] + calc["tax_paise"] == calc["total_paise"]
 
 
 def test_revert_scenario_restores_date_and_setting():
     """Verifies that reverting a scenario restores historical date and setting, including restore-of-restore."""
-    created = create_event({
-        "title": "Date Revert Test Event",
-        "event_type": "anniversary",
-        "city": "Jaipur",
-        "event_date": "2026-11-01",
-        "setting": "outdoor",
-        "guest_count": 100,
-        "target_budget_paise": 50000000,
-    })
+    created = create_event(
+        {
+            "title": "Date Revert Test Event",
+            "event_type": "anniversary",
+            "city": "Jaipur",
+            "event_date": "2026-11-01",
+            "setting": "outdoor",
+            "guest_count": 100,
+            "target_budget_paise": 50000000,
+        }
+    )
     evt_id = created["event_id"]
 
     # Commit v2: change date to 2026-12-25 and setting to indoor
@@ -1087,14 +1190,16 @@ def test_unconfirmed_zero_price_quote_approval_blocked():
     assert data["extracted_items"][0]["unit_cost_paise"] == 0
     assert "PRICE_UNCONFIRMED" in str(data["extracted_items"][0].get("notes"))
 
-    evt = create_event({
-        "title": "Photo Test Event",
-        "event_type": "birthday",
-        "city": "Delhi",
-        "event_date": "2026-11-15",
-        "guest_count": 80,
-        "target_budget_paise": 30000000,
-    })
+    evt = create_event(
+        {
+            "title": "Photo Test Event",
+            "event_type": "birthday",
+            "city": "Delhi",
+            "event_date": "2026-11-15",
+            "guest_count": 80,
+            "target_budget_paise": 30000000,
+        }
+    )
 
     with pytest.raises(ValueError, match="Cannot approve quote with unconfirmed zero price"):
         approve_vendor_quote_in_db(
@@ -1106,13 +1211,29 @@ def test_unconfirmed_zero_price_quote_approval_blocked():
 
 
 def test_inclusive_quote_survives_approval_commit_restore_and_payment(client):
-    event_id = create_event({"title": "Inclusive tax", "event_type": "birthday", "city": "Delhi",
-                            "event_date": "2027-12-01", "guest_count": 100,
-                            "target_budget_paise": 50000000})["event_id"]
-    parsed = parse_vendor_quote_text("Catering Rs 850 per plate including 5% GST. 40% advance.", 100)["data"]
-    response = client.post(f"/api/events/{event_id}/approve-quote", json={
-        "vendor_name": "Caterer", "category": "Food", "items": parsed["extracted_items"],
-        "advance_deposit_paise": parsed["advance_deposit_paise"], "idempotency_key": "inclusive"})
+    event_id = create_event(
+        {
+            "title": "Inclusive tax",
+            "event_type": "birthday",
+            "city": "Delhi",
+            "event_date": "2027-12-01",
+            "guest_count": 100,
+            "target_budget_paise": 50000000,
+        }
+    )["event_id"]
+    parsed = parse_vendor_quote_text(
+        "Catering Rs 850 per plate including 5% GST. 40% advance.", 100
+    )["data"]
+    response = client.post(
+        f"/api/events/{event_id}/approve-quote",
+        json={
+            "vendor_name": "Caterer",
+            "category": "Food",
+            "items": parsed["extracted_items"],
+            "advance_deposit_paise": parsed["advance_deposit_paise"],
+            "idempotency_key": "inclusive",
+        },
+    )
     assert response.status_code == 200
     approved = response.json()
     assert approved["total_quote_paise"] == 8500000
@@ -1123,18 +1244,35 @@ def test_inclusive_quote_survives_approval_commit_restore_and_payment(client):
         else:
             revert_scenario_version(event_id, 1, "Restore original")
         state = client.get(f"/api/events/{event_id}").json()
-        item = next(it for it in state["solvency"]["items"] if it["name"] == parsed["extracted_items"][0]["name"])
+        item = next(
+            it
+            for it in state["solvency"]["items"]
+            if it["name"] == parsed["extracted_items"][0]["name"]
+        )
         assert item["total_paise"] == 85000 * count
         assert item["paid_amount_paise"] == 3400000
         assert item["calculated_payment_status"] == "PARTIAL"
         assert state["solvency"]["total_paid_paise"] == 3400000
 
 
-@pytest.mark.parametrize("field,value", [("event_date", "2027-02-30"), ("start_time", "27:81"),
-                                        ("timezone", "Moon/Crater"), ("currency", "USD")])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("event_date", "2027-02-30"),
+        ("start_time", "27:81"),
+        ("timezone", "Moon/Crater"),
+        ("currency", "USD"),
+    ],
+)
 def test_rejects_invalid_calendar_and_unsupported_currency(client, field, value):
-    payload = {"title": "Validation event", "event_type": "birthday", "city": "Delhi",
-               "event_date": "2027-12-01", "guest_count": 100, "target_budget_paise": 50000000}
+    payload = {
+        "title": "Validation event",
+        "event_type": "birthday",
+        "city": "Delhi",
+        "event_date": "2027-12-01",
+        "guest_count": 100,
+        "target_budget_paise": 50000000,
+    }
     payload[field] = value
     assert client.post("/api/events", json=payload).status_code == 422
 
@@ -1142,10 +1280,20 @@ def test_rejects_invalid_calendar_and_unsupported_currency(client, field, value)
 def test_same_day_and_fractional_overnight_schedule(client):
     from datetime import datetime
     from zoneinfo import ZoneInfo
+
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
-    event_id = create_event({"title": "Late celebration", "event_type": "birthday", "city": "Delhi",
-                            "event_date": today, "start_time": "23:30", "duration_hours": 1.5,
-                            "guest_count": 50, "target_budget_paise": 5000000})["event_id"]
+    event_id = create_event(
+        {
+            "title": "Late celebration",
+            "event_type": "birthday",
+            "city": "Delhi",
+            "event_date": today,
+            "start_time": "23:30",
+            "duration_hours": 1.5,
+            "guest_count": 50,
+            "target_budget_paise": 5000000,
+        }
+    )["event_id"]
     state = get_event_by_id(event_id)
     assert all(task["due_date"] == today for task in state["tasks"])
     assert state["runbook"][-1]["time_slot"].endswith("01:00 (+1d)")
@@ -1157,22 +1305,39 @@ def test_same_day_and_fractional_overnight_schedule(client):
 
 def test_payment_key_rejects_changed_reference(client):
     event_id = client.get("/api/events").json()["events"][0]["id"]
-    payload = {"amount_paise": 10000, "payment_method": "UPI", "reference_note": "First",
-               "idempotency_key": "same-operation"}
+    payload = {
+        "amount_paise": 10000,
+        "payment_method": "UPI",
+        "reference_note": "First",
+        "idempotency_key": "same-operation",
+    }
     assert client.post(f"/api/events/{event_id}/record-payment", json=payload).status_code == 200
     payload["reference_note"] = "Different transfer"
     assert client.post(f"/api/events/{event_id}/record-payment", json=payload).status_code == 409
 
 
-@pytest.mark.parametrize("items", [[], [{"name": "Bad", "pricing_model": "FIXED", "unit_cost_paise": -1}],
-                                    [{"name": "Bad", "pricing_model": "FIXED", "unit_cost_paise": 1.5}]])
+@pytest.mark.parametrize(
+    "items",
+    [
+        [],
+        [{"name": "Bad", "pricing_model": "FIXED", "unit_cost_paise": -1}],
+        [{"name": "Bad", "pricing_model": "FIXED", "unit_cost_paise": 1.5}],
+    ],
+)
 def test_quote_rejects_malformed_financial_input(client, items):
     event_id = client.get("/api/events").json()["events"][0]["id"]
-    assert client.post(f"/api/events/{event_id}/approve-quote", json={
-        "vendor_name": "Test", "category": "Food", "items": items}).status_code == 422
+    assert (
+        client.post(
+            f"/api/events/{event_id}/approve-quote",
+            json={"vendor_name": "Test", "category": "Food", "items": items},
+        ).status_code
+        == 422
+    )
 
 
-@pytest.mark.parametrize("change", [{"new_guests": 400}, {"new_date": "2027-12-31"}, {"new_setting": "indoor"}])
+@pytest.mark.parametrize(
+    "change", [{"new_guests": 400}, {"new_date": "2027-12-31"}, {"new_setting": "indoor"}]
+)
 def test_saved_dependency_flags_match_preview_without_client_task_ids(client, change):
     event_id = client.get("/api/events").json()["events"][0]["id"]
     before = client.get(f"/api/events/{event_id}").json()["event"]
@@ -1180,8 +1345,14 @@ def test_saved_dependency_flags_match_preview_without_client_task_ids(client, ch
     preview = client.post(f"/api/events/{event_id}/simulate", json=payload).json()
     affected = {item["id"] for item in preview["dag_impacts"]}
     assert affected
-    response = client.post(f"/api/events/{event_id}/commit-scenario", json={
-        **payload, "note": "Dependency regression", "base_version": before["active_scenario_version"]})
+    response = client.post(
+        f"/api/events/{event_id}/commit-scenario",
+        json={
+            **payload,
+            "note": "Dependency regression",
+            "base_version": before["active_scenario_version"],
+        },
+    )
     assert response.status_code == 200
     tasks = client.get(f"/api/events/{event_id}").json()["tasks"]
     assert all(task["status"] == "NEEDS_REVIEW" for task in tasks if task["id"] in affected)
@@ -1189,8 +1360,12 @@ def test_saved_dependency_flags_match_preview_without_client_task_ids(client, ch
 
 def test_quote_retry_conflict_and_oversized_deposit_rollback(client):
     event_id = client.get("/api/events").json()["events"][0]["id"]
-    payload = {"vendor_name": "Retry vendor", "category": "Decor", "idempotency_key": "quote-retry",
-               "items": [{"name": "Flowers", "pricing_model": "FIXED", "unit_cost_paise": 10000}]}
+    payload = {
+        "vendor_name": "Retry vendor",
+        "category": "Decor",
+        "idempotency_key": "quote-retry",
+        "items": [{"name": "Flowers", "pricing_model": "FIXED", "unit_cost_paise": 10000}],
+    }
     endpoint = f"/api/events/{event_id}/approve-quote"
     assert client.post(endpoint, json=payload).status_code == 200
     assert client.post(endpoint, json=payload).json()["already_approved"]
@@ -1200,4 +1375,168 @@ def test_quote_retry_conflict_and_oversized_deposit_rollback(client):
     payload["idempotency_key"] = "new-quote"
     payload["advance_deposit_paise"] = 30000
     assert client.post(endpoint, json=payload).status_code == 400
-    assert client.get(f"/api/events/{event_id}").json()["solvency"]["total_projected_paise"] == before
+    assert (
+        client.get(f"/api/events/{event_id}").json()["solvency"]["total_projected_paise"] == before
+    )
+
+
+@pytest.mark.parametrize("text", ["a" * 150, "🎉नमस्ते" * 400, "", "SUMMARY:Celebration"])
+def test_calendar_folding_preserves_unicode_and_octet_limits(text):
+    folded = _fold_ics_line(text)
+    assert folded.replace("\r\n ", "") == text
+    assert all(len(line.encode("utf-8")) <= 75 for line in folded.split("\r\n"))
+
+
+def test_reinitializing_database_preserves_recorded_financial_state():
+    event_id = list_events()[0]["id"]
+    record_payment(
+        event_id, 12345, "UPI", "Migration preservation", idempotency_key="migration-preserve"
+    )
+    before = get_event_by_id(event_id)
+    init_db()
+    init_db()
+    after = get_event_by_id(event_id)
+    assert after == before
+    assert len(list_events()) == 3
+
+
+def test_unexpected_server_error_does_not_disclose_internal_details(monkeypatch):
+    def broken_read():
+        raise RuntimeError("private-connection-string-and-path")
+
+    monkeypatch.setattr("main.list_events", broken_read)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/events")
+    assert response.status_code == 500
+    assert "private-connection" not in response.text
+    assert response.json()["detail"] == "Unable to complete this request. Please try again."
+
+
+def test_tiered_quantity_keeps_exact_integer_boundaries():
+    guests = 10**20 + 1
+    result = compute_line_item_paise("STEP_TIERED", 100, guests, step_capacity=10)
+    assert result["quantity"] == 10**19 + 1
+
+
+@pytest.mark.parametrize("preferences", ["omitted", None, {}])
+def test_create_event_optional_preferences(client, preferences):
+    payload = {
+        "title": "Fresh event",
+        "event_type": "birthday",
+        "city": "Delhi",
+        "event_date": "2027-12-01",
+        "guest_count": 50,
+        "target_budget_paise": 5000000,
+    }
+    if preferences != "omitted":
+        payload["preferences"] = preferences
+    response = client.post("/api/events", json=payload)
+    assert response.status_code == 200
+    state = get_event_by_id(response.json()["event_id"])
+    assert state["event"]["preferences"] == {}
+    assert state["payments"] == []
+
+
+def test_cash_cannot_settle_other_obligations():
+    items = [
+        {
+            "id": name,
+            "pricing_model": "FIXED",
+            "unit_cost_paise": 100000,
+            "approval_state": "APPROVED",
+            "paid_amount_paise": 90000,
+        }
+        for name in ("a", "b")
+    ]
+    result = evaluate_event_solvency(
+        500000,
+        0,
+        items,
+        1,
+        payments=[
+            {"budget_item_id": "a", "amount_paise": 150000},
+            {"amount_paise": 100000},
+        ],
+    )
+    assert result["total_paid_paise"] == 250000
+    assert result["unallocated_paid_paise"] == 100000
+    assert result["unapplied_to_items_paise"] == 100000
+    assert result["total_outstanding_paise"] == 100000
+    assert result["projected_outstanding_paise"] == 100000
+    assert result["items"][1]["calculated_payment_status"] == "UNPAID"
+
+
+def test_new_event_rejects_past_date(client):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    yesterday = datetime.now(ZoneInfo("Asia/Kolkata")).date() - timedelta(days=1)
+    response = client.post(
+        "/api/events",
+        json={
+            "title": "Past event",
+            "event_type": "birthday",
+            "city": "Delhi",
+            "event_date": yesterday.isoformat(),
+            "guest_count": 50,
+            "target_budget_paise": 5000000,
+        },
+    )
+    assert response.status_code == 400
+    assert "future event date" in response.json()["detail"]
+
+
+def test_restore_preserves_later_contract_and_replaced_estimate(client):
+    event_id = list_events()[0]["id"]
+    before = get_event_by_id(event_id)
+    estimate = next(i for i in before["budget_items"] if i["approval_state"] == "ESTIMATED")
+    commit_scenario_version(event_id, before["event"]["guest_count"])
+    current = get_event_by_id(event_id)
+    copied = next(i for i in current["budget_items"] if i["obligation_id"] == estimate["id"])
+    quote = approve_vendor_quote_in_db(
+        event_id,
+        "Regression vendor",
+        estimate["category"],
+        [{"name": "Retained contract", "pricing_model": "FIXED", "unit_cost_paise": 100000}],
+        advance_deposit_paise=20000,
+        supersedes_item_ids=[copied["id"]],
+    )
+    record_payment(event_id, 20000, "UPI", "Deposit", budget_item_id=quote["item_ids"][0])
+    payments_before = get_event_by_id(event_id)["payments"]
+    revert_scenario_version(event_id, 1, "Restore planning assumptions")
+    state = client.get(f"/api/events/{event_id}").json()
+    contract = next(i for i in state["solvency"]["items"] if i["name"] == "Retained contract")
+    assert contract["approval_state"] == "APPROVED"
+    assert contract["paid_amount_paise"] == 20000
+    assert (
+        next(i for i in state["solvency"]["items"] if i["obligation_id"] == estimate["id"])[
+            "approval_state"
+        ]
+        == "REPLACED"
+    )
+    assert get_event_by_id(event_id)["payments"] == payments_before
+    assert any(v["id"] == quote["commitment_id"] for v in state["vendors"])
+
+
+def test_reschedule_moves_deadlines_and_restore_reverses_shift():
+    from datetime import date, timedelta
+
+    event_id = list_events()[0]["id"]
+    before = get_event_by_id(event_id)
+    original_date = date.fromisoformat(before["event"]["event_date"])
+    commit_scenario_version(
+        event_id,
+        before["event"]["guest_count"],
+        new_date=(original_date + timedelta(days=12)).isoformat(),
+    )
+    after = get_event_by_id(event_id)
+    dates = {t["id"]: t["due_date"] for t in after["tasks"]}
+    for task in before["tasks"]:
+        expected = date.fromisoformat(task["due_date"])
+        expected += timedelta(days=12)
+        assert dates[task["id"]] == expected.isoformat()
+    revert_scenario_version(event_id, 1, "Return to original date")
+    restored = get_event_by_id(event_id)
+    assert {t["id"]: t["due_date"] for t in restored["tasks"]} == {
+        t["id"]: t["due_date"] for t in before["tasks"]
+    }

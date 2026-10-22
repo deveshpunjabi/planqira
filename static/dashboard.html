@@ -123,7 +123,7 @@
             <span class="fin-icon">💳</span>
           </div>
           <div class="fin-value" id="finPaid" style="color: var(--status-green);">₹0</div>
-          <div class="fin-sub">Payments recorded</div>
+          <div class="fin-sub" id="finPaymentAllocation">Payments recorded</div>
         </div>
 
         <div class="fin-metric-card">
@@ -132,7 +132,7 @@
             <span class="fin-icon">⏳</span>
           </div>
           <div class="fin-value" id="finOutstanding">₹0</div>
-          <div class="fin-sub">Pending settlement</div>
+          <div class="fin-sub">Approved items less their allocated payments</div>
         </div>
 
         <div class="fin-metric-card fin-card-solvency">
@@ -388,12 +388,12 @@
 
         <div class="range-row">
           <div style="flex: 1;">
-            <label class="form-label">Number of guests</label>
+            <label class="form-label" for="simHeadcountSlider">Number of guests</label>
             <input type="range" id="simHeadcountSlider" min="50" max="600" step="5" value="250" oninput="onHeadcountSliderChange(this.value)">
           </div>
 
           <div style="width: 160px;">
-            <label class="form-label">Venue Setting</label>
+            <label class="form-label" for="simSettingSelect">Venue Setting</label>
             <select id="simSettingSelect" class="form-control">
               <option value="outdoor">Outdoor Lawn</option>
               <option value="indoor">Indoor Hall</option>
@@ -402,7 +402,7 @@
           </div>
 
           <div style="width: 160px;">
-            <label class="form-label">Event Date</label>
+            <label class="form-label" for="simDateInput">Event Date</label>
             <input type="date" id="simDateInput" class="form-control">
           </div>
 
@@ -500,13 +500,13 @@
       </div>
       <div class="modal-card-body">
         <div class="form-group">
-          <label class="form-label">Event Title</label>
+          <label class="form-label" for="newEvtTitle">Event Title</label>
           <input type="text" id="newEvtTitle" class="form-control" placeholder="e.g., Ananya & Rohan's Sangeet Celebration">
         </div>
 
         <div class="grid-2">
           <div class="form-group">
-            <label class="form-label">Event Type</label>
+            <label class="form-label" for="newEvtType">Event Type</label>
             <select id="newEvtType" class="form-control">
               <option value="wedding">Wedding</option>
               <option value="birthday">Birthday</option>
@@ -517,14 +517,14 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">City</label>
+            <label class="form-label" for="newEvtCity">City</label>
             <input type="text" id="newEvtCity" class="form-control" placeholder="e.g., Udaipur">
           </div>
         </div>
 
         <div class="grid-2">
           <div class="form-group">
-            <label class="form-label">Event Date</label>
+            <label class="form-label" for="newEvtDate">Event Date</label>
             <input type="date" id="newEvtDate" class="form-control">
           </div>
 
@@ -539,7 +539,7 @@
 
         <div class="grid-2">
           <div class="form-group">
-            <label class="form-label">Venue Setting</label>
+            <label class="form-label" for="newEvtSetting">Venue Setting</label>
             <select id="newEvtSetting" class="form-control">
               <option value="outdoor">Outdoor Lawn</option>
               <option value="indoor">Indoor Hall</option>
@@ -548,19 +548,19 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">Expected guests</label>
+            <label class="form-label" for="newEvtGuests">Expected guests</label>
             <input type="number" id="newEvtGuests" class="form-control" value="200" min="10" max="5000">
           </div>
         </div>
 
         <div class="form-group">
-          <label class="form-label">Target Budget (Rupees ₹)</label>
+          <label class="form-label" for="newEvtBudget">Target Budget (Rupees ₹)</label>
           <input type="number" id="newEvtBudget" class="form-control" value="1000000" min="10000" step="50000">
         </div>
 
         <div class="grid-2">
           <div class="form-group">
-            <label class="form-label">Dietary Preference</label>
+            <label class="form-label" for="newEvtDietary">Dietary Preference</label>
             <select id="newEvtDietary" class="form-control">
               <option value="standard">Standard Gourmet Multi-Cuisine</option>
               <option value="jain">Strict Jain & Sattvic Pure Veg</option>
@@ -569,7 +569,7 @@
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Aesthetic Style</label>
+            <label class="form-label" for="newEvtStyle">Aesthetic Style</label>
             <select id="newEvtStyle" class="form-control">
               <option value="royal">Royal Heritage & Regal Grandeur</option>
               <option value="minimalist">Modern Minimalist & Architectural</option>
@@ -668,12 +668,12 @@
       </div>
       <div class="modal-card-body">
         <div class="form-group">
-          <label class="form-label">Payment Amount (Rupees ₹)</label>
+          <label class="form-label" for="payAmountRs">Payment Amount (Rupees ₹)</label>
           <input type="number" id="payAmountRs" class="form-control" placeholder="e.g., 50000" min="1">
         </div>
 
         <div class="form-group">
-          <label class="form-label">Payment Method</label>
+          <label class="form-label" for="payMethod">Payment Method</label>
           <select id="payMethod" class="form-control">
             <option value="BANK_TRANSFER_NEFT">Bank Transfer / NEFT</option>
             <option value="UPI">UPI / Instant Transfer</option>
@@ -683,7 +683,7 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Reference Note / Transaction Number</label>
+          <label class="form-label" for="payReference">Reference Note / Transaction Number</label>
           <input type="text" id="payReference" class="form-control" placeholder="e.g., NEFT Txn #928192 — Catering token advance">
         </div>
       </div>
@@ -703,7 +703,7 @@
       </div>
       <div class="modal-card-body">
         <div class="form-group">
-          <label class="form-label">Severity Level</label>
+          <label class="form-label" for="incSeverity">Severity Level</label>
           <select id="incSeverity" class="form-control">
             <option value="LOW">Low (Informational / Minor Delay)</option>
             <option value="MEDIUM" selected>Medium (Operational Adjustment)</option>
@@ -713,17 +713,17 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Incident Title</label>
+          <label class="form-label" for="incTitle">Incident Title</label>
           <input type="text" id="incTitle" class="form-control" placeholder="e.g., Sudden wind gust displaced lawn floral archway">
         </div>
 
         <div class="form-group">
-          <label class="form-label">Operational Description</label>
+          <label class="form-label" for="incDesc">Operational Description</label>
           <textarea id="incDesc" class="form-control" style="min-height: 80px;" placeholder="Describe what happened, timestamp, and affected guests/crew..."></textarea>
         </div>
 
         <div class="form-group">
-          <label class="form-label">Resolution / Action Taken (Optional)</label>
+          <label class="form-label" for="incResolution">Resolution / Action Taken (Optional)</label>
           <input type="text" id="incResolution" class="form-control" placeholder="e.g., Transferred under covered portico with crew reinforcement in 15 mins">
         </div>
       </div>
@@ -743,16 +743,16 @@
       </div>
       <div class="modal-card-body">
         <div class="callout callout-amber">
-          <strong>Safe Non-Destructive Revert:</strong> Reverting creates a new forward scenario revision that restores line items and parameters from the chosen version. Payment records, commitments, and historical logs are strictly preserved.
+          <strong>Restore planning assumptions:</strong> This creates a new version using the earlier plan. Current approved contracts, replaced estimates, payments and history are kept. Checklist deadlines move with the event date, and affected work needs review. Restoring a plan does not cancel a vendor contract.
         </div>
 
         <div class="form-group">
-          <label class="form-label">Select Target Version to Restore</label>
+          <label class="form-label" for="revertVersionSelect">Select Target Version to Restore</label>
           <select id="revertVersionSelect" class="form-control"></select>
         </div>
 
         <div class="form-group">
-          <label class="form-label">Concrete Reason for Reverting</label>
+          <label class="form-label" for="revertReasonInput">Concrete Reason for Reverting</label>
           <input type="text" id="revertReasonInput" class="form-control" placeholder="e.g., Client decided against guest expansion back to original headcount">
         </div>
       </div>

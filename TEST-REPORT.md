@@ -1,10 +1,18 @@
-# Planqira verification — 21 October 2026
+# Planqira verification — 22 October 2026
 
 ## Current result
 
-**64 tests passed locally:** 51 backend cases and 13 Chromium browser cases. These are regression checks, not a guarantee of zero defects or a PromptWars score.
+**79 tests passed locally:** 65 backend cases and 14 Chromium browser cases. These are regression checks, not a guarantee of zero defects or a PromptWars score.
 
 The audit baseline passed 48 tests. Additional workflow tests cover inclusive-tax quote approval/reload/revisions, payment allocation through restores, invalid calendar inputs, same-day scheduling, overnight calendar times, malformed financial inputs, dependency preview/save parity, approval conflicts and rollback, lost-response payment retry, and editable quote approval with explicit replacement choices.
+
+The latest repair cases cover omitted/null/empty preferences, past-date rejection, unallocated/overpaid cash isolation, retained contracts and payments after restore, reversible deadline shifts, and associated dashboard form controls.
+
+## Structure and efficiency verification
+
+The code-quality cleanup preserves the original 64 passing cases and adds seven cases for repeated initialization with existing payment records, exact integer tier boundaries, safe unexpected-error responses, and Unicode calendar folding. Ruff lint and formatting checks both pass and are enforced in CI.
+
+A synthetic SQLite measurement used 10,000 unrelated audit records, five rounds of 100 reads, and the same recent-activity query. The baseline query plan scanned audit_logs; the new plan uses idx_logs_event_id. Median time per query was 1.307 ms before and 0.4151 ms after on this Windows environment. This measures one local query, not overall application throughput or deployed latency.
 
 ## Browser coverage
 

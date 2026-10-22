@@ -42,11 +42,16 @@ Without a provider key, quote reading uses a basic parser. Always review extract
 
 ## How it works
 
-- `engine.py`: integer-paise pricing, tax rounding, budget calculations, and task dependencies.
-- `database.py`: SQLite persistence, seeded examples, payments, event revisions, tasks, and audit records.
+- `main.py`: application lifecycle, middleware, and event routes.
+- `schemas.py`: validated API request contracts.
+- `engine.py`: integer-paise pricing, budget calculations, and task dependencies.
+- `database.py`: event reads, payments, quotes, scenario revisions, and operational updates.
+- `database_setup.py`, `seed_data.py`, `event_creation.py`: schema setup, fictional examples, and initial event construction.
+- `exports.py`: CSV and calendar routes and encoding.
 - `ai_service.py`: quote extraction and the basic-parser fallback.
-- `main.py`: FastAPI routes and CSV/calendar exports.
 - `static/`: homepage, dashboard, shared styles, and browser behavior.
+
+See [the architecture guide](DOCUMENTATION.md) for responsibilities and financial invariants.
 
 Money calculations use integer paise. The default reserve is 10% of the target budget. Quote approval and cash payment are separate actions. Budget estimates are illustrative planning inputs, not verified vendor availability or market quotations. Cultural and dietary preferences need review by the organiser.
 
@@ -55,10 +60,12 @@ Money calculations use integer paise. The default reserve is 10% of the target b
 ```sh
 pip install -r requirements-dev.txt
 python -m playwright install chromium
+python -m ruff check .
+python -m ruff format --check .
 python -m pytest test_engine.py test_e2e_playwright.py
 ```
 
-The test suite passes **51 backend tests and 13 browser checks (64 total)**. Browser tests start their own loopback server and use a temporary database; no manually running server is needed. They cover navigation, refresh, error recovery, loading/empty states, quote review, payment persistence, scenario previews, dialog focus, exports, and layouts at 390/768/1440 pixels. See [TEST-REPORT.md](TEST-REPORT.md) for scope and limitations.
+The test suite passes **65 backend tests and 14 browser checks (79 total)**. Browser tests start their own loopback server and use a temporary database; no manually running server is needed. They cover navigation, refresh, error recovery, loading/empty states, quote review, payment persistence, scenario previews, dialog focus, exports, and layouts at 390/768/1440 pixels. See [TEST-REPORT.md](TEST-REPORT.md) for scope and limitations.
 
 For an existing compatible browser installation, tests accept `PLAYWRIGHT_EXECUTABLE_PATH`. Optional `PLANQIRA_SCREENSHOT_DIR` saves preview images outside the repository. GitHub Actions installs browser dependencies and runs both suites.
 
@@ -77,6 +84,8 @@ For an existing compatible browser installation, tests accept `PLAYWRIGHT_EXECUT
 
 ## Latest audit repairs
 
+Optional preferences now accept omitted/null/empty values without a server error. Outstanding balances use item allocations, so unassigned cash or overpaying another item cannot hide debt. Restores retain current approved contracts and replaced estimates. Date changes shift checklist deadlines and flag affected work for review; new events reject past dates in their timezone. Dashboard labels are associated with their controls.
+
 Tax-inclusive prices now persist through approval, reload, scenario changes, and restores. Item-linked payments keep their allocation across newly created revisions. Scenario preview and save share task-dependency rules. Quote review allows price correction and explicitly selecting replaced estimates. Payment retries reuse an operation key; changed payloads under the same key are rejected.
 
 Calendar inputs validate real dates, times, and IANA timezones. Timed calendar entries export in UTC, including overnight runbook cues. Short-notice tasks no longer start yesterday. Browser CORS defaults to same-origin; optional `PLANQIRA_ALLOWED_ORIGINS` allows explicit frontend origins. This is not an authentication mechanism.
@@ -85,7 +94,7 @@ The homepage calculator is illustrative and does not read the current saved ledg
 
 ## Deployment and current limits
 
-The repository includes a Vercel ASGI entry point and routing configuration. **Vercel is currently a demonstration deployment:** SQLite is stored in `/tmp`, which is not durable shared storage across serverless instances. `DATABASE_URL` is detected but does not activate a PostgreSQL adapter. Managed PostgreSQL support is unfinished.
+The repository includes a Vercel ASGI entry point and routing configuration. **Vercel is currently a demonstration deployment:** SQLite is stored in `/tmp`, which is not durable shared storage across serverless instances. `DATABASE_URL` does not activate a PostgreSQL adapter. Managed PostgreSQL support is unfinished.
 
 Other remaining release work:
 
@@ -93,4 +102,4 @@ Other remaining release work:
 - Live provider/model compatibility was not verified in the isolated regression run.
 - Automated browser checks are not a full accessibility audit or production certification.
 
-The uploaded delivery report and older architecture notes contain broader claims than current evidence supports. This README and the current test report describe the verified scope. Confirm the official PromptWars rules, repository-size definition, branch requirements, and submission limits before submitting.
+The uploaded delivery report contains broader claims than current evidence supports; repository architecture notes have been consolidated and corrected. This README and the current test report describe the verified scope. Confirm the official PromptWars rules, repository-size definition, branch requirements, and submission limits before submitting.

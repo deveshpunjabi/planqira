@@ -25,6 +25,11 @@ jobs:
           pip install -r requirements-dev.txt
           python -m playwright install --with-deps chromium
 
+      - name: Check Code Quality
+        run: |
+          python -m ruff check .
+          python -m ruff format --check .
+
       - name: Run Test Suite
         run: |
           python -m pytest test_engine.py test_e2e_playwright.py -v

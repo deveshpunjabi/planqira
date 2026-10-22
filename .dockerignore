@@ -3,6 +3,7 @@ __pycache__
 *.pyo
 *.pyd
 .pytest_cache
+.ruff_cache
 .git
 .github
 node_modules

@@ -190,6 +190,9 @@ function renderAll(data) {
   document.getElementById("finProjected").textContent = formatPaise(sol.total_projected_paise);
   document.getElementById("finCommitted").textContent = formatPaise(sol.total_approved_commitments_paise || 0);
   document.getElementById("finPaid").textContent = formatPaise(sol.total_paid_paise);
+  document.getElementById("finPaymentAllocation").textContent = sol.unapplied_to_items_paise
+    ? `${formatPaise(sol.unapplied_to_items_paise)} not allocated to budget items`
+    : "Payments recorded";
   document.getElementById("finOutstanding").textContent = formatPaise(sol.total_outstanding_paise || 0);
 
   const finVar = document.getElementById("finVariance");
