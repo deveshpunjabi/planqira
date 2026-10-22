@@ -1,3 +1,18 @@
+[project]
+name = "planqira"
+version = "2.1.0"
+description = "Planqira — Event Decision & Operations Platform"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.7.0",
+    "google-genai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "tzdata>=2024.1",
+]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
