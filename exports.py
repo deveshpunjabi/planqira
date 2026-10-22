@@ -19,13 +19,16 @@ router = APIRouter()
 def _sanitize_csv_cell(val: Any) -> str:
     """Neutralizes CSV formula injection attacks by prefixing dangerous triggers with single quote."""
     s = str(val or "")
-    if s.startswith(("=", "+", "-", "@", "\t", "\r")):
+    if s.startswith(("=", "+", "-", "@", "\t", "\r", "%", "|")):
         return f"'{s}"
     return s
 
 
 @router.get("/api/events/{event_id}/export.csv")
 def export_csv(event_id: str):
+    if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", event_id):
+        raise HTTPException(status_code=400, detail="Invalid event identifier format")
+
     data = get_event_by_id(event_id)
     if not data:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -151,6 +154,9 @@ def _fold_ics_line(line: str) -> str:
 
 @router.get("/api/events/{event_id}/export.ics")
 def export_ics(event_id: str):
+    if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", event_id):
+        raise HTTPException(status_code=400, detail="Invalid event identifier format")
+
     data = get_event_by_id(event_id)
     if not data:
         raise HTTPException(status_code=404, detail="Event not found")

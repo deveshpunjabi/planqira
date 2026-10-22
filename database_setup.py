@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+import tempfile
 
 from seed_data import seed_demo_events
 
@@ -13,7 +14,7 @@ def get_db_path() -> str:
     if os.getenv("PLANQIRA_DB_PATH"):
         return os.getenv("PLANQIRA_DB_PATH")
     if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
-        return "/tmp/planqira.db"
+        return os.path.join(tempfile.gettempdir(), "planqira.db")
     return DB_FILE
 
 
@@ -32,6 +33,12 @@ def get_connection(db_path: str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(target_path, factory=ClosingConnection, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.execute("PRAGMA cache_size = -64000;")
+    conn.execute("PRAGMA temp_store = MEMORY;")
+    conn.execute("PRAGMA mmap_size = 268435456;")
+    conn.execute("PRAGMA busy_timeout = 5000;")
     return conn
 
 
@@ -199,58 +206,66 @@ def init_db(db_path: str | None = None) -> None:
             seed_demo_events(conn)
 
 
+_TABLE_INFO_QUERIES = {
+    "events": "PRAGMA table_info(events);",
+    "scenarios": "PRAGMA table_info(scenarios);",
+    "budget_items": "PRAGMA table_info(budget_items);",
+    "vendor_commitments": "PRAGMA table_info(vendor_commitments);",
+    "tasks": "PRAGMA table_info(tasks);",
+    "payments": "PRAGMA table_info(payments);",
+}
+
+_STATIC_MIGRATIONS = [
+    ("events", "start_time", "ALTER TABLE events ADD COLUMN start_time TEXT NOT NULL DEFAULT '15:00';"),
+    ("events", "duration_hours", "ALTER TABLE events ADD COLUMN duration_hours REAL NOT NULL DEFAULT 5.0;"),
+    ("events", "timezone", "ALTER TABLE events ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata';"),
+    ("events", "setting", "ALTER TABLE events ADD COLUMN setting TEXT NOT NULL DEFAULT 'outdoor';"),
+    ("events", "preferences_json", "ALTER TABLE events ADD COLUMN preferences_json TEXT DEFAULT '{}';"),
+    ("scenarios", "setting", "ALTER TABLE scenarios ADD COLUMN setting TEXT NOT NULL DEFAULT 'outdoor';"),
+    ("scenarios", "event_date", "ALTER TABLE scenarios ADD COLUMN event_date TEXT;"),
+    ("budget_items", "deposit_required_paise", "ALTER TABLE budget_items ADD COLUMN deposit_required_paise INTEGER NOT NULL DEFAULT 0;"),
+    ("budget_items", "superseded_by_id", "ALTER TABLE budget_items ADD COLUMN superseded_by_id TEXT;"),
+    ("budget_items", "is_tax_inclusive", "ALTER TABLE budget_items ADD COLUMN is_tax_inclusive INTEGER NOT NULL DEFAULT 0;"),
+    ("budget_items", "obligation_id", "ALTER TABLE budget_items ADD COLUMN obligation_id TEXT;"),
+    ("vendor_commitments", "deposit_required_paise", "ALTER TABLE vendor_commitments ADD COLUMN deposit_required_paise INTEGER NOT NULL DEFAULT 0;"),
+    ("vendor_commitments", "needs_reconfirmation", "ALTER TABLE vendor_commitments ADD COLUMN needs_reconfirmation INTEGER NOT NULL DEFAULT 0;"),
+    ("vendor_commitments", "idempotency_key", "ALTER TABLE vendor_commitments ADD COLUMN idempotency_key TEXT;"),
+    ("vendor_commitments", "request_fingerprint", "ALTER TABLE vendor_commitments ADD COLUMN request_fingerprint TEXT;"),
+    ("tasks", "reverification_reason", "ALTER TABLE tasks ADD COLUMN reverification_reason TEXT;"),
+    ("payments", "idempotency_key", "ALTER TABLE payments ADD COLUMN idempotency_key TEXT;"),
+]
+
+_STATIC_INDEXES = [
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_event_idempotency_unique ON payments(event_id, idempotency_key);",
+    "CREATE INDEX IF NOT EXISTS idx_scenarios_event_status ON scenarios (event_id, status);",
+    "CREATE INDEX IF NOT EXISTS idx_items_scenario ON budget_items (scenario_id);",
+    "CREATE INDEX IF NOT EXISTS idx_vendors_event ON vendor_commitments (event_id);",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_event_due ON tasks (event_id, due_date);",
+    "CREATE INDEX IF NOT EXISTS idx_runbook_event ON runbook_cues (event_id);",
+    "CREATE INDEX IF NOT EXISTS idx_themes_event ON themes (event_id);",
+    "CREATE INDEX IF NOT EXISTS idx_payments_event_date ON payments (event_id, paid_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_incidents_event_date ON incidents (event_id, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_logs_event_id ON audit_logs (event_id, id DESC);",
+]
+
+
 def _apply_migrations(conn: sqlite3.Connection) -> None:
-    """Adds missing columns gracefully if migrating an earlier schema version."""
-    migrations = [
-        ("events", "start_time", "TEXT NOT NULL DEFAULT '15:00'"),
-        ("events", "duration_hours", "REAL NOT NULL DEFAULT 5.0"),
-        ("events", "timezone", "TEXT NOT NULL DEFAULT 'Asia/Kolkata'"),
-        ("events", "setting", "TEXT NOT NULL DEFAULT 'outdoor'"),
-        ("events", "preferences_json", "TEXT DEFAULT '{}'"),
-        ("scenarios", "setting", "TEXT NOT NULL DEFAULT 'outdoor'"),
-        ("budget_items", "deposit_required_paise", "INTEGER NOT NULL DEFAULT 0"),
-        ("budget_items", "superseded_by_id", "TEXT"),
-        ("vendor_commitments", "deposit_required_paise", "INTEGER NOT NULL DEFAULT 0"),
-        ("vendor_commitments", "needs_reconfirmation", "INTEGER NOT NULL DEFAULT 0"),
-        ("vendor_commitments", "idempotency_key", "TEXT"),
-        ("vendor_commitments", "request_fingerprint", "TEXT"),
-        ("tasks", "reverification_reason", "TEXT"),
-        ("scenarios", "event_date", "TEXT"),
-        ("payments", "idempotency_key", "TEXT"),
-        ("budget_items", "is_tax_inclusive", "INTEGER NOT NULL DEFAULT 0"),
-        ("budget_items", "obligation_id", "TEXT"),
-    ]
-    columns_by_table = {
-        table: {row["name"] for row in conn.execute(f"PRAGMA table_info({table});")}
-        for table in {table for table, _, _ in migrations}
-    }
-    for table, col, col_def in migrations:
-        if col not in columns_by_table[table]:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def};")
+    """Adds missing columns gracefully if migrating an earlier schema version without dynamic SQL formatting."""
+    columns_by_table: dict[str, set[str]] = {}
+    for table, query in _TABLE_INFO_QUERIES.items():
+        columns_by_table[table] = {row["name"] for row in conn.execute(query)}
+
+    for table, col, ddl in _STATIC_MIGRATIONS:
+        if col not in columns_by_table.get(table, set()):
+            conn.execute(ddl)
             columns_by_table[table].add(col)
 
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_event_idempotency_unique ON payments(event_id, idempotency_key);"
-    )
-
-    # Index the event-scoped reads used for every dashboard refresh and export.
-    indexes = {
-        "scenarios_event_status": ("scenarios", "event_id, status"),
-        "items_scenario": ("budget_items", "scenario_id"),
-        "vendors_event": ("vendor_commitments", "event_id"),
-        "tasks_event_due": ("tasks", "event_id, due_date"),
-        "runbook_event": ("runbook_cues", "event_id"),
-        "themes_event": ("themes", "event_id"),
-        "payments_event_date": ("payments", "event_id, paid_at DESC"),
-        "incidents_event_date": ("incidents", "event_id, created_at DESC"),
-        "logs_event_id": ("audit_logs", "event_id, id DESC"),
-    }
-    for name, (table, columns) in indexes.items():
-        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{name} ON {table} ({columns});")
+    for index_ddl in _STATIC_INDEXES:
+        conn.execute(index_ddl)
 
     # Backfill scenarios.event_date from events.event_date where null
     conn.execute("""
-            UPDATE scenarios 
-            SET event_date = (SELECT event_date FROM events WHERE events.id = scenarios.event_id)
-            WHERE event_date IS NULL;
-        """)
+        UPDATE scenarios 
+        SET event_date = (SELECT event_date FROM events WHERE events.id = scenarios.event_id)
+        WHERE event_date IS NULL;
+    """)

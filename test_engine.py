@@ -1540,3 +1540,66 @@ def test_reschedule_moves_deadlines_and_restore_reverses_shift():
     assert {t["id"]: t["due_date"] for t in restored["tasks"]} == {
         t["id"]: t["due_date"] for t in before["tasks"]
     }
+
+
+def test_security_headers_present_on_all_responses(client):
+    """Verify enterprise HTTP security headers across API routes."""
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    headers = res.headers
+    assert headers.get("x-content-type-options") == "nosniff"
+    assert headers.get("x-frame-options") == "DENY"
+    assert headers.get("x-xss-protection") == "1; mode=block"
+    assert "strict-origin-when-cross-origin" in headers.get("referrer-policy", "")
+    assert "default-src 'self'" in headers.get("content-security-policy", "")
+    assert "max-age=31536000" in headers.get("strict-transport-security", "")
+    assert headers.get("cross-origin-opener-policy") == "same-origin"
+    assert headers.get("cross-origin-resource-policy") == "same-origin"
+
+
+def test_payload_size_limit_rejects_oversized_request(client):
+    """Verify DoS mitigation blocks oversized payloads exceeding 2MB."""
+    headers = {"content-length": "3000000"}
+    res = client.post("/api/events", json={"title": "Test"}, headers=headers)
+    assert res.status_code == 413
+    assert "Payload Too Large" in res.json()["detail"]
+
+
+def test_null_byte_injection_rejected(client):
+    """Verify input validation stops null-byte injection attempts."""
+    payload = {
+        "title": "Malicious\x00Event",
+        "event_type": "Wedding",
+        "city": "Mumbai",
+        "event_date": "2027-01-01",
+        "guest_count": 100,
+        "target_budget_paise": 10000000,
+    }
+    res = client.post("/api/events", json=payload)
+    assert res.status_code == 422
+
+
+def test_malformed_event_id_route_parameter_rejected(client):
+    """Verify malformed or directory traversal event_ids are safely rejected."""
+    res = client.get("/api/events/invalid@char!")
+    assert res.status_code == 400
+    assert "Invalid event_id format" in res.json()["detail"]
+
+
+def test_rate_limiter_unit_logic():
+    """Verify sliding-window rate limiter state machine."""
+    from main import SlidingWindowRateLimiter
+
+    limiter = SlidingWindowRateLimiter(default_limit=3, window_seconds=10)
+    allowed, rem, _ = limiter.check("test-ip-1")
+    assert allowed and rem == 2
+    allowed, rem, _ = limiter.check("test-ip-1")
+    assert allowed and rem == 1
+    allowed, rem, _ = limiter.check("test-ip-1")
+    assert allowed and rem == 0
+    # 4th request in window exceeds ceiling
+    allowed, rem, reset_sec = limiter.check("test-ip-1")
+    assert not allowed
+    assert rem == 0
+    assert reset_sec > 0
+

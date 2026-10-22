@@ -1,5 +1,6 @@
 """Validated API input contracts; no database or web application dependencies."""
 
+import re
 from datetime import datetime
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -7,7 +8,24 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, Field, field_validator
 
 
-class CalendarRequest(BaseModel):
+class SanitizedModel(BaseModel):
+    """Base model enforcing null-byte protection and basic XSS script tag stripping on inputs."""
+
+    @field_validator("*", mode="before", check_fields=False)
+    @classmethod
+    def sanitize_input(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            if "\x00" in v:
+                raise ValueError("Null bytes are strictly prohibited in request inputs.")
+            # Neutralize script tags for defense-in-depth against stored XSS
+            cleaned = re.sub(
+                r"<\s*script[^>]*>.*?<\s*/\s*script\s*>", "", v, flags=re.IGNORECASE | re.DOTALL
+            )
+            return cleaned.strip()
+        return v
+
+
+class CalendarRequest(SanitizedModel):
     @field_validator("event_date", "new_date", "deposit_due_date", check_fields=False)
     @classmethod
     def valid_date(cls, value):
@@ -66,16 +84,16 @@ class CommitScenarioRequest(CalendarRequest):
     invalidated_task_ids: list[str] | None = None
 
 
-class RevertScenarioRequest(BaseModel):
+class RevertScenarioRequest(SanitizedModel):
     target_version: int = Field(..., ge=1)
     reason: str = Field(..., min_length=3, max_length=200)
 
 
-class QuoteParseRequest(BaseModel):
+class QuoteParseRequest(SanitizedModel):
     raw_quote_text: str = Field(..., min_length=5, max_length=4000)
 
 
-class QuoteItem(BaseModel):
+class QuoteItem(SanitizedModel):
     name: str = Field(min_length=1, max_length=200)
     pricing_model: Literal["FIXED", "PER_CAPITA", "STEP_TIERED"]
     unit_cost_paise: int = Field(ge=0, strict=True)
@@ -97,7 +115,7 @@ class ApproveQuoteRequest(CalendarRequest):
     idempotency_key: str | None = None
 
 
-class RecordPaymentRequest(BaseModel):
+class RecordPaymentRequest(SanitizedModel):
     amount_paise: int = Field(..., gt=0)
     payment_method: str = Field("BANK_TRANSFER", max_length=50)
     reference_note: str = Field(..., min_length=2, max_length=200)
@@ -106,16 +124,16 @@ class RecordPaymentRequest(BaseModel):
     idempotency_key: str | None = None
 
 
-class CreateIncidentRequest(BaseModel):
+class CreateIncidentRequest(SanitizedModel):
     severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "MEDIUM"
     title: str = Field(..., min_length=3, max_length=120)
     description: str = Field(..., min_length=5, max_length=500)
     resolution: str | None = None
 
 
-class UpdateTaskRequest(BaseModel):
+class UpdateTaskRequest(SanitizedModel):
     status: Literal["PENDING", "DONE", "NEEDS_REVIEW"]
 
 
-class UpdateRunbookRequest(BaseModel):
+class UpdateRunbookRequest(SanitizedModel):
     status: Literal["PENDING", "ACTIVE", "COMPLETED", "DELAYED"]
